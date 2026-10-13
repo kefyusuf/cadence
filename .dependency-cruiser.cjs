@@ -55,6 +55,20 @@ module.exports = {
       to: { path: '^src/adapters' },
     },
     {
+      name: 'config-is-pure',
+      severity: 'error',
+      comment: 'src/config validates values it is handed. Importing dotenv or reading a file here would move the boundary between "the environment" and "the rules" back into the part that is supposed to be testable without either.',
+      from: { path: '^src/config' },
+      to: { dependencyTypes: ['npm', 'core'] },
+    },
+    {
+      name: 'core-domain-scheduler-do-not-know-config',
+      severity: 'error',
+      comment: 'Configuration is how the application is assembled, not part of the engine. If core, domain or scheduler imported src/config, the published recurrence engine would need an environment to run.',
+      from: { path: '^src/(core|domain|scheduler)' },
+      to: { path: '^src/config' },
+    },
+    {
       name: 'src-does-not-know-dev-only-paths',
       severity: 'error',
       comment: 'Shipping code may not import tests, verification scripts or build output.',

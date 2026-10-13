@@ -133,6 +133,18 @@ record('the internal adapter layer is not importable', () =>
   ),
 );
 
+// Same reasoning for the configuration layer: the engine must not need an environment to run, so
+// how this repo reads its own is not part of what a consumer may import.
+record('the configuration layer is not importable', () =>
+  runNode(
+    'module',
+    `let code = 'no error';
+     try { await import('cadence/config'); } catch (error) { code = error.code }
+     if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('cadence/config behaved as: ' + code);
+     console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
+  ),
+);
+
 record('every exports target exists', () => {
   if (!existsSync(path.join(root, 'dist'))) throw new Error('dist/ is missing, run npm run build first');
 

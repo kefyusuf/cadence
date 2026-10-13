@@ -36,6 +36,17 @@ export default tseslint.config(
     },
   },
   {
+    // dependency-cruiser can only see imports, and `process` is a global: this is the rule that
+    // actually keeps the layers above the boundary from reading the environment directly.
+    files: ['src/!(adapters)/**/*.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { name: 'process', message: 'Only src/adapters reads the environment — take it as an argument.' },
+      ],
+    },
+  },
+  {
     files: ['test/**/*.ts'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
