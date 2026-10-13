@@ -28,7 +28,8 @@ at runtime, and what would have to be true for a health check to mean something"
    happened to leave behind — `dist` is in `.dockerignore` precisely so that a stale host build
    cannot leak into the context.
    Measured contents of `/app` in the prod image: `dist` (52 files), `package.json`, `README.md`,
-   `node_modules`, `scripts/selfcheck.mjs` — 272K on disk.
+   `node_modules`, `scripts/selfcheck.mjs` — 272K on disk. Remeasured after the first adapter landed:
+   56 files, 296K (ADR 0006 adds four files under `dist/adapters`); the image itself is still 330MB.
 
 2. **The runtime install is `npm ci --omit=dev`, and the interesting part is what it installed.**
    The first build of `prod` failed with

@@ -7,10 +7,11 @@ A recurring-schedule engine and team board. The part that is hard is the part th
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** week 3 of a build-in-public schedule — core engine, domain vocabulary, package
-surface, the layering gates that keep them apart, the first async layer that waits for an
-occurrence instead of just computing it, and a production image that checks itself. The HTTP API,
-board UI, cache, queue and observability layers come later; see `docs/adr/`.
+**Status:** week 3 of a build-in-public schedule — core engine, domain vocabulary, package surface,
+the layering gates that keep them apart, the first async layer that waits for an occurrence instead
+of just computing it, a production image that checks itself, and the first adapter implementing one
+of the domain ports. The HTTP API, board UI, cache, queue and observability layers come later; see
+`docs/adr/`.
 
 ## What it does today
 
@@ -55,17 +56,46 @@ occurrence it was waiting for on the cursor, so a second `runSeries` on the same
 up. Cancellation is a value the caller branches on, not an exception —
 see [ADR 0004](docs/adr/0004-cancellation-is-a-value-and-the-clock-is-an-argument.md).
 
+The scheduler takes a `(occurrence) => …` callback, and the domain port that knows about work items
+is `ScheduleNotifier`. The first adapter for it is a factory with an injected sink, so the
+composition is one line:
+
+```ts
+import { createLogNotifier } from './src/adapters/log-notifier.js'; // repo-internal, not exported
+
+// clock and sleep step the calendar forward to each due time instead of waiting for it — with the
+// real `sleep` this run would take three days.
+const notifier = createLogNotifier({ sink: (record) => console.log(JSON.stringify(record)), clock });
+
+await runSeries(cursor, { clock, sleep, notify: (occurrence) => notifier.notify(item, occurrence), limit: 3 });
+// {"msg":"cadence.due","itemId":"wi_deploy","boardId":"bd_core","assigneeId":"mb_yusuf","title":"Deploy the release",
+//  "index":0,"due":"2026-03-28T01:30:00.000Z","wall":"2026-03-28 02:30:00","tz":"Europe/Berlin",
+//  "disambiguation":"exact","emittedAt":"2026-03-28T01:30:00.000Z","late":false}   <- the first record, in full
+// then: index 1  due 2026-03-29T01:00:00.000Z  wall 2026-03-29 02:30:00  gap-roll-forward
+//       index 2  due 2026-03-30T00:30:00.000Z  wall 2026-03-30 02:30:00  exact
+// { delivered: 3, late: 0, endedBy: 'limit' }
+```
+
+Both times are in every record on purpose: that rule is daily, so `wall` never moves while `due`
+steps 23h then 24h across the spring gap. A sink that throws costs the occurrence it was handed —
+`runSeries` consumes before it notifies, so delivery is at-most-once until week 12 adds an outbox.
+The reasoning, including the `bindNotifier` helper that was rejected, is in
+[ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md).
+
 Three entry points, nothing else: `cadence` (recurrence engine, zero dependencies, no I/O),
-`cadence/domain` (branded ids, board types, ports for adapters that do not exist yet) and
-`cadence/scheduler` (`sleep` and `runSeries` — the only layer that waits). `cadence/src/...` is
-closed, and CommonJS can `require()` all three on Node >= 22.12 — the reasoning is in
+`cadence/domain` (branded ids, board types, ports for the adapters that mostly do not exist yet) and
+`cadence/scheduler` (`sleep` and `runSeries` — the only layer that waits). `src/adapters` is
+compiled into `dist` and ships in the tarball, but the `exports` map has no key for it, so it is
+internal until publishing it is a decision. `cadence/src/...` is closed, and CommonJS can
+`require()` all three on Node >= 22.12 — the reasoning is in
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md).
 
 Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recurrence-over-epoch-arithmetic.md)
 (wall-clock arithmetic), [ADR 0002](docs/adr/0002-throw-inside-result-at-the-boundary.md) (errors),
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md) (package shape),
 [ADR 0004](docs/adr/0004-cancellation-is-a-value-and-the-clock-is-an-argument.md) (waiting),
-[ADR 0005](docs/adr/0005-production-image-ships-dist-and-proves-itself.md) (the production image).
+[ADR 0005](docs/adr/0005-production-image-ships-dist-and-proves-itself.md) (the production image),
+[ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md) (the first adapter).
 
 ## Run it
 
@@ -74,12 +104,12 @@ All of this is green on the host and inside the image CI uses:
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (27 files)
-npm run lint:deps     # dependency-cruiser: core, domain and scheduler import nothing, and nothing in core or domain reaches the scheduler
-npm test              # 97 tests, wall-clock recurrence, DST transitions, cancellation
+npm run lint          # eslint flat config, type-aware (29 files)
+npm run lint:deps     # dependency-cruiser: core, domain and scheduler import no packages, no builtins and no adapters, and nothing in core or domain reaches the scheduler
+npm test              # 110 tests, wall-clock recurrence, DST transitions, cancellation, the notifier
 npm run test:coverage # 99% statements / 95% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
-npm run verify:package # 10 checks against the built package, not the source tree
+npm run verify:package # 11 checks against the built package, not the source tree
 ```
 
 ```sh
@@ -116,8 +146,10 @@ docker compose run --rm --build prod    # the self-check, under read_only + cap_
 ```
 src/core/      clock.ts (wall <-> instant), recurrence.ts (rule -> occurrence),
                cursor.ts, errors.ts, result.ts, index.ts
-src/domain/    ids.ts (branded ids + parseId), model.ts, ports.ts (adapters plug in here)
+src/domain/    ids.ts (branded ids + parseId), model.ts, ports.ts (the shapes adapters implement)
 src/scheduler/ sleep.ts (a cancellable wait), run-series.ts (walk a cursor in due order), index.ts
+src/adapters/  log-notifier.ts (a ScheduleNotifier that renders one record per occurrence and hands
+               it to an injected sink) — internal: dist has it, the exports map does not
 test/          behaviour, DST transitions, validation, cancellation, public surface
 scripts/       verify-package.mjs (the package surface), typecheck-consumer.ts,
                selfcheck.mjs (what the prod image runs as CMD and HEALTHCHECK)
@@ -125,16 +157,22 @@ Dockerfile     deps -> deps-prod -> build -> test -> prod
 docs/adr/      decisions with their consequences
 ```
 
-`src/core`, `src/domain` and `src/scheduler` import no packages and no Node builtins, and neither
-`src/core` nor `src/domain` may reach the scheduler — enforced by `npm run lint:deps`, not by a
-comment. That is what makes the edge cases cheap to test and keeps the engine usable from a
-browser bundle later.
+`src/core`, `src/domain` and `src/scheduler` import no packages and no Node builtins, neither
+`src/core` nor `src/domain` may reach the scheduler, and none of the three may import
+`src/adapters` — enforced by `npm run lint:deps`, not by a comment. That is what makes the edge
+cases cheap to test, keeps the engine usable from a browser bundle later, and is the reason an
+adapter can be swapped without the engine noticing.
 
 ## Not yet
 
-Adapters (the ports in `src/domain/ports.ts` still have no implementations — `runSeries` takes a
-`notify` callback rather than a `ScheduleNotifier`), persistence, HTTP surface, board UI, caching,
-queueing, metrics. Each lands with its own test seam rather than as scaffolding.
+One adapter exists. Of the ports in `src/domain/ports.ts`, `ScheduleNotifier` has an implementation
+and `Clock`, `IdGenerator`, `BoardStore` and `WorkItemStore` do not; persistence, the HTTP surface,
+board UI, caching, queueing and metrics are all still to come. Each lands with its own test seam
+rather than as scaffolding.
+
+Delivery is at-most-once: `runSeries` advances the cursor before it notifies, so a sink that throws
+loses that occurrence and a retry replays from the next one. Making that at-least-once needs stored
+progress and a retry — week 12, not a wrapper around the notifier.
 
 The prod image has no service to keep alive either: its `HEALTHCHECK` runs the same self-check the
 `CMD` does, so it proves the image is capable of answering a probe, not that a server is up. That
