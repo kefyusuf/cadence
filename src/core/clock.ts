@@ -27,6 +27,13 @@ const MAX_EPOCH_MS = 8.64e15;
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
 function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  // The type says `string`; a value that arrived from outside does not have to. `undefined` is what a
+  // JSON body with no `tz` turns into, and Intl reads an absent option as "use the host's zone" — so a
+  // rule nobody wrote would silently acquire the time zone of whichever machine ran it.
+  if (typeof timeZone !== 'string') {
+    throw new CadenceError('INVALID_TIME_ZONE', 'time zone must be an IANA string');
+  }
+
   const cached = formatterCache.get(timeZone);
   if (cached !== undefined) return cached;
 

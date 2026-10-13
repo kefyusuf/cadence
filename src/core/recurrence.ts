@@ -2,7 +2,9 @@ import { CadenceError } from './errors.js';
 import { fromThrowable, type Result } from './result.js';
 import { assertInstant, instantFromWallClock, wallClockAt, type Disambiguation, type WallClock } from './clock.js';
 
-export type Frequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+const FREQUENCIES = ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] as const;
+
+export type Frequency = (typeof FREQUENCIES)[number];
 
 export const WEEK_DAYS = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'] as const;
 export type WeekDay = (typeof WEEK_DAYS)[number];
@@ -51,6 +53,13 @@ function weekIndexOf(token: WeekDay): number {
 }
 
 function normalize(rec: Recurrence): Normalized {
+  // Checked first, and checked against the list the type is derived from: a frequency the switch in
+  // `periodWalls` does not handle produces no candidates at all, which the walk below can only
+  // notice after 4000 periods. A caller that typed `HOURLY` deserves that answer immediately.
+  if (!FREQUENCIES.includes(rec.freq)) {
+    throw new CadenceError('INVALID_FREQUENCY', `freq must be one of ${FREQUENCIES.join(', ')}, got ${String(rec.freq)}`);
+  }
+
   const interval = rec.interval ?? 1;
   if (!Number.isInteger(interval) || interval < 1) {
     throw new CadenceError('INVALID_INTERVAL', `interval must be an integer >= 1, got ${String(rec.interval)}`);

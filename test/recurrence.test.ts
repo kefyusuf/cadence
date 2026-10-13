@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CadenceError } from '../src/core/errors.js';
 import { wallClockAt } from '../src/core/clock.js';
-import { nextOccurrence, type Recurrence, type WeekDay } from '../src/core/recurrence.js';
+import { nextOccurrence, type Frequency, type Recurrence, type WeekDay } from '../src/core/recurrence.js';
 
 const W = (year: number, month: number, day: number, hour: number, minute: number, second = 0) => ({
   year,
@@ -202,6 +202,14 @@ describe('time zone boundaries', () => {
 describe('validation', () => {
   const anchor = Date.UTC(2026, 0, 6, 9, 0);
 
+  it('rejects a frequency it does not implement instead of walking 4000 empty periods', () => {
+    const unsupported = 'HOURLY';
+    expectError(
+      () => nextOccurrence({ tz: 'UTC', dtStart: anchor, freq: unsupported as Frequency }, anchor),
+      'INVALID_FREQUENCY',
+    );
+  });
+
   it('rejects an interval below one', () => {
     expectError(() => nextOccurrence({ tz: 'UTC', dtStart: anchor, freq: 'DAILY', interval: 0 }, anchor), 'INVALID_INTERVAL');
     expectError(() => nextOccurrence({ tz: 'UTC', dtStart: anchor, freq: 'DAILY', interval: 1.5 }, anchor), 'INVALID_INTERVAL');
@@ -213,6 +221,11 @@ describe('validation', () => {
 
   it('rejects an unknown IANA time zone', () => {
     expectError(() => nextOccurrence({ tz: 'Mars/Olympus_Mons', dtStart: anchor, freq: 'DAILY' }, anchor), 'INVALID_TIME_ZONE');
+  });
+
+  it('rejects a rule with no time zone rather than inheriting the host clock', () => {
+    const missing = undefined as unknown as string;
+    expectError(() => nextOccurrence({ tz: missing, dtStart: anchor, freq: 'DAILY' }, anchor), 'INVALID_TIME_ZONE');
   });
 
   it('rejects byWeekDay outside a weekly rule', () => {
