@@ -26,42 +26,60 @@ layers, and what has to be true for that placement to survive the next layer add
 
 1. **Configuration is its own layer, `src/config`, and it is not part of the domain.** `src/domain`
    is board vocabulary — members, work items, boards. Configuration is how *this application* is
-   assembled, and the reusable engine must not need it. Two rules say so:
-   `config-is-pure` (nothing under `src/config` may import a package or a Node builtin) and
-   `core-domain-scheduler-do-not-know-config`. Both were fired on a throwaway copy of the tree:
+   assembled, and the reusable engine must not need it. Three rules say so: `config-is-pure` (nothing
+   under `src/config` may import a package or a Node builtin), `core-domain-scheduler-do-not-know-config`
+   and `config-do-not-know-adapters`. All three were fired by adding throwaway probe files to the real
+   tree, running `npx dependency-cruiser src --no-progress` once, and deleting them:
 
    ```
-   error core-domain-scheduler-do-not-know-config: src/scheduler/probe.ts → src/config/app-config.ts
-     error core-domain-scheduler-do-not-know-config: src/domain/probe.ts → src/config/app-config.ts
-     error core-domain-scheduler-do-not-know-config: src/core/probe.ts → src/config/app-config.ts
-     error config-is-pure: src/config/probe.ts → fs
+     error core-domain-scheduler-do-not-know-config: src/scheduler/__probe.ts → src/config/app-config.ts
+     error core-domain-scheduler-do-not-know-config: src/domain/__probe.ts → src/config/app-config.ts
+     error core-domain-scheduler-do-not-know-config: src/core/__probe.ts → src/config/app-config.ts
+     error config-is-pure: src/config/__probe.ts → fs/promises
+     error config-do-not-know-adapters: src/config/__probe.ts → src/adapters/env-config.ts
 
-   x 4 dependency violations (4 errors, 0 warnings). 21 modules, 27 dependencies cruised.
+   x 5 dependency violations (5 errors, 0 warnings). 21 modules, 28 dependencies cruised.
    ```
 
-   The copy was deleted afterwards; against the real tree the run reports 0 violations.
+   With the probes gone the same command reports 0 violations. `config-do-not-know-adapters` is the
+   one worth reading: `config-is-pure` cannot catch `src/config` importing `src/adapters/env-config.ts`,
+   because that is a local import — and that single edge would put a `process.env` read inside the layer
+   whose entire purpose is not to have one. The direction gate has to cover the transitive case, not
+   just the builtin.
 
 2. **A purity rule over imports was not enough, because `process` is a global.** `config-is-pure`
    can only see module specifiers — `src/config` reading `process.env.PORT` would have been invisible
    to dependency-cruiser, and the gate would have been a decoration. The rule that actually holds the
-   line is an ESLint `no-restricted-globals` for `process` applied to `src/!(adapters)/**/*.ts`.
-   Fired with `--stdin` against the same files pattern:
+   line is an ESLint `no-restricted-globals` for `process`. It was fired with the repo's own config, by
+   putting the same one-line probe on both sides of the boundary and linting all three at once:
 
    ```
-   C:\Users\yukonit\AppData\Local\Temp\src\config\probe.ts
-     1:21  error  Unexpected use of 'process'. Only src/adapters reads the environment — take it as an argument  no-restricted-globals
+   E:\projects\cadence\src\__probe.ts
+     1:32  error  Unexpected use of 'process'. Only src/adapters reads the environment — take it as an argument  no-restricted-globals
+
+   E:\projects\cadence\src\config\__probe.ts
+     1:32  error  Unexpected use of 'process'. Only src/adapters reads the environment — take it as an argument  no-restricted-globals
+
+   ✖ 2 problems (2 errors, 0 warnings)
    ```
 
-   and, for `src/adapters/probe.ts`, `File ignored because no matching configuration was supplied` —
-   which is the same proof from the other side: the glob excludes the one layer that is allowed to
-   read the environment.
+   The third probe, `src/adapters/__probe.ts`, is the same line and reports nothing — the exclusion is
+   the other half of the proof. Probing against the real config rather than a hand-written minimal one
+   is what caught the first version of this rule being wrong: it read
+   `files: ['src/!(adapters)/**/*.ts']`, and because `!(adapters)` consumes exactly one path segment, a
+   file placed *directly* in `src/` matched no configuration at all — which is where the next slice's
+   composition root is a candidate to land. The block now reads `files: ['src/**/*.ts']` with
+   `ignores: ['src/adapters/**']`. `npx eslint --print-config <path>` makes that checkable without a
+   probe: `no-restricted-globals` is present for `src/index.ts`, `src/server/main.ts`,
+   `src/config/x.ts` and `src/scheduler/y.ts`, absent for `src/adapters/env-config.ts` and `test/x.ts`.
 
 3. **The parser takes a record and never touches the platform.** `parseAppConfig(values: StringRecord)`
    returns `Result<AppConfig, CadenceError>`; `StringRecord` is
    `Readonly<Record<string, string | undefined>>`. All the rules are therefore testable without
    mutating a process, and the composition root can be tested by handing over a record.
-   `loadAppConfig(env: StringRecord = process.env)` is the whole adapter — eleven lines, and the only
-   place in `src/` where the default argument is what makes the environment reachable at all.
+   `loadAppConfig(env: StringRecord = process.env)` is the whole adapter — one function whose only
+   content is a default argument, and the only place in `src/` where the default is what makes the
+   environment reachable at all.
 
 4. **The defaults are the safe side of a mistake.** Unset `HOST` binds `127.0.0.1`, not `0.0.0.0`;
    `PORT` is 3000, `LOG_LEVEL` is `info`, `NODE_ENV` is `development`. The failure mode of a forgotten
@@ -130,3 +148,19 @@ layers, and what has to be true for that placement to survive the next layer add
   name we did not choose. If staging needs distinct behaviour later, it gets a setting, not a string.
 - Adding a fifth setting is now a fixed-cost move: a rule in `src/config`, a case in the refusal
   tests, and nothing anywhere else can read the environment to skip that work.
+- **The globals rule exempts `src/adapters` as a directory, not `env-config.ts` as a file.** A second
+  adapter that read `process.env` would pass every gate, so "one file reads the environment" is a
+  convention the tooling enforces one level coarser than the claim. Kept at directory granularity on
+  purpose — an adapter is the layer that is allowed to touch the platform, and naming files in a lint
+  config means editing the config every time one is added. If a second reader ever appears, the check
+  worth writing is a `verify:package`-style count of `process.env` occurrences under `src/`, not a
+  narrower lint rule.
+- How the measurements above were produced, so a reader can falsify them rather than trust them:
+  `npm run typecheck && npm run lint && npm run lint:deps && npm test && npm run test:coverage && npm run build && npm run verify:package`
+  on the host (Node v26.8.2), then `docker build --target test` followed by
+  `docker run --rm cadence-test sh -c "npm run lint && npm run lint:deps && npm test && npm run build && npm run verify:package"`
+  and the same set through `docker compose run --rm --build app` (Node 24.21.0), and finally
+  `docker run --rm --read-only --cap-drop=ALL --security-opt no-new-privileges:true cadence-prod`
+  for the prod image. All of it was re-run after a review closed two gaps in these very gates — the
+  `src/*.ts` blind spot in decision 2 and the missing `config-do-not-know-adapters` edge in
+  decision 1 — and the numbers are from that re-run.

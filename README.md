@@ -126,7 +126,7 @@ All of this is green on the host and inside the image CI uses:
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
 npm run lint          # eslint flat config, type-aware (33 files)
-npm run lint:deps     # dependency-cruiser: core, domain, scheduler and config import no packages, no builtins and no adapters, and none of the three reaches config or the scheduler
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters, and core, domain and scheduler do not reach src/config either
 npm test              # 133 tests, wall-clock recurrence, DST transitions, cancellation, the notifier, configuration
 npm run test:coverage # 99% statements / 96% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
@@ -181,9 +181,11 @@ Dockerfile     deps -> deps-prod -> build -> test -> prod
 docs/adr/      decisions with their consequences
 ```
 
-`src/core`, `src/domain`, `src/scheduler` and `src/config` import no packages and no Node builtins,
-neither `src/core` nor `src/domain` may reach the scheduler, none of the three may import
-`src/adapters` or `src/config`, and only `src/adapters` may touch the `process` global — enforced by
+`src/core`, `src/domain`, `src/scheduler` and `src/config` import no packages and no Node builtins;
+`src/core` and `src/domain` may not reach the scheduler; none of `src/core`, `src/domain`,
+`src/scheduler` or `src/config` may import `src/adapters` — that last edge matters, because importing
+`src/adapters/env-config.ts` would hand the pure configuration layer a `process.env` read through the
+back door; and no file under `src/` outside `src/adapters` may touch the `process` global — enforced by
 `npm run lint:deps` and `npm run lint`, not by a comment. That is what makes the edge cases cheap to
 test, keeps the engine usable from a browser bundle later, and is the reason an adapter can be
 swapped without the engine noticing.

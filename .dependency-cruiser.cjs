@@ -69,6 +69,13 @@ module.exports = {
       to: { path: '^src/config' },
     },
     {
+      name: 'config-do-not-know-adapters',
+      severity: 'error',
+      comment: 'config-is-pure cannot see this: an import of src/adapters/env-config.ts from src/config would reach process.env transitively while every gate stays green, which is the one thing the configuration layer exists to prevent.',
+      from: { path: '^src/config' },
+      to: { path: '^src/adapters' },
+    },
+    {
       name: 'src-does-not-know-dev-only-paths',
       severity: 'error',
       comment: 'Shipping code may not import tests, verification scripts or build output.',

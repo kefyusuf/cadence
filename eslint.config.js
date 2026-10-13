@@ -37,8 +37,11 @@ export default tseslint.config(
   },
   {
     // dependency-cruiser can only see imports, and `process` is a global: this is the rule that
-    // actually keeps the layers above the boundary from reading the environment directly.
-    files: ['src/!(adapters)/**/*.ts'],
+    // actually keeps the layers above the boundary from reading the environment directly. `src/**`
+    // with the adapters directory excluded, because `src/!(adapters)/**/*.ts` does not match a file
+    // sitting directly in src — exactly where the next layer would land.
+    files: ['src/**/*.ts'],
+    ignores: ['src/adapters/**'],
     rules: {
       'no-restricted-globals': [
         'error',

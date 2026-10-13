@@ -113,8 +113,11 @@ at runtime, and what would have to be true for a health check to mean something"
    TypeScript side gets them from `@types/node`. The first `npm run lint` after adding the script
    reported both as `no-undef`.
 
-10. **`.dockerignore` now ignores what no target uses** — `docs/`, `.gitignore`, `.gitattributes`.
-    Measured context: 254295 bytes before, 232952 after.
+10. **`.dockerignore` now ignores what no target uses** — `docs`, `.gitignore`, `.gitattributes`.
+    The context pair first recorded here (254295 → 232952 bytes) went stale on its own: what these
+    three lines remove is exactly the size of those paths, and `docs/` grows with every decision
+    written into it. Re-measured with `du -sb docs .gitignore .gitattributes` at 53408 bytes — a dated
+    number, kept here as the example of the kind that must never turn into a claim about the image.
 
 ## Consequences
 
