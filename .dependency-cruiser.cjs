@@ -34,6 +34,20 @@ module.exports = {
       to: { path: '^src/domain' },
     },
     {
+      name: 'scheduler-is-pure',
+      severity: 'error',
+      comment: 'src/scheduler receives its timer and its clock as arguments. Reaching for a builtin timer here would make a wait impossible to test without real time passing.',
+      from: { path: '^src/scheduler' },
+      to: { dependencyTypes: ['npm', 'core'] },
+    },
+    {
+      name: 'core-and-domain-do-not-know-scheduler',
+      severity: 'error',
+      comment: 'The scheduler drives the engine from the outside. core and domain must stay loadable without it, otherwise the reusable part of the package inherits its async machinery.',
+      from: { path: '^src/(core|domain)' },
+      to: { path: '^src/scheduler' },
+    },
+    {
       name: 'src-does-not-know-dev-only-paths',
       severity: 'error',
       comment: 'Shipping code may not import tests, verification scripts or build output.',

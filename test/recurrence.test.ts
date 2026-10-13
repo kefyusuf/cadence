@@ -52,6 +52,14 @@ describe('daily series', () => {
     expect(nextOccurrence(daily(), jan7)?.index).toBe(2);
   });
 
+  it('floors a dtStart carrying sub-second milliseconds instead of rounding it', () => {
+    const withMillis = { tz: 'UTC', dtStart: anchor + 987, freq: 'DAILY' } as const;
+    const jan7 = Date.UTC(2026, 0, 7, 9, 0);
+
+    expect(nextOccurrence(withMillis, anchor - 1)?.instant).toBe(anchor);
+    expect(nextOccurrence(withMillis, anchor)?.instant).toBe(jan7);
+  });
+
   it('walks the whole series when the cursor is decades ahead', () => {
     const far = Date.UTC(2066, 0, 6, 9, 0);
     const occ = nextOccurrence(daily(), far);

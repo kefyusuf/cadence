@@ -16,6 +16,10 @@
       "types": "./dist/domain/index.d.ts",
       "default": "./dist/domain/index.js"
     },
+    "./scheduler": {
+      "types": "./dist/scheduler/index.d.ts",
+      "default": "./dist/scheduler/index.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

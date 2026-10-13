@@ -71,6 +71,46 @@ record('cjs: require("cadence/domain")', () =>
   ),
 );
 
+record('esm: import "cadence/scheduler"', () =>
+  runNode(
+    'module',
+    `const { createSeriesCursor } = await import('cadence');
+     const { runSeries, sleep } = await import('cadence/scheduler');
+     if (typeof sleep !== 'function') throw new Error('sleep is missing');
+     const cursor = createSeriesCursor({ tz: 'UTC', dtStart: 0, freq: 'DAILY' });
+     const waits = [];
+     const summary = await runSeries(cursor, {
+       clock: { now: () => 0 },
+       sleep: async (ms) => { waits.push(ms); },
+       notify: () => undefined,
+       limit: 2,
+     });
+     if (summary.delivered !== 2 || summary.endedBy !== 'limit') throw new Error('unexpected summary: ' + JSON.stringify(summary));
+     if (waits.join(',') !== '0,86400000') throw new Error('unexpected waits: ' + waits.join(','));
+     console.log('ok, 2 delivered after waits of 0 and 86400000 ms')`,
+  ),
+);
+
+record('cjs: require("cadence/scheduler")', () =>
+  runNode(
+    'commonjs',
+    `(async () => {
+       const { createSeriesCursor } = require('cadence');
+       const { runSeries } = require('cadence/scheduler');
+       const cursor = createSeriesCursor({ tz: 'UTC', dtStart: 0, freq: 'WEEKLY', byWeekDay: ['MO'] });
+       const indexes = [];
+       const summary = await runSeries(cursor, {
+         clock: { now: () => 0 },
+         sleep: async () => undefined,
+         notify: (occurrence) => { indexes.push(occurrence.index); },
+         limit: 3,
+       });
+       if (indexes.join(',') !== '0,1,2') throw new Error('unexpected indexes: ' + indexes.join(','));
+       console.log('ok on ' + process.version);
+     })()`,
+  ),
+);
+
 record('deep import "cadence/src/..." is blocked', () =>
   runNode(
     'module',

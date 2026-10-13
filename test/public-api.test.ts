@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as cadence from '../src/core/index.js';
 import * as cadenceDomain from '../src/domain/index.js';
+import * as cadenceScheduler from '../src/scheduler/index.js';
 
 const CORE_RUNTIME_EXPORTS = [
   'CADENCE_ERROR_CODES',
@@ -30,6 +31,10 @@ describe('public surface', () => {
 
   it('exposes exactly the domain runtime exports', () => {
     expect(Object.keys(cadenceDomain)).toEqual(['parseId']);
+  });
+
+  it('exposes exactly the scheduler runtime exports', () => {
+    expect(Object.keys(cadenceScheduler).sort()).toEqual(['runSeries', 'sleep']);
   });
 
   it('serves wall-clock correct occurrences through the barrel', () => {
