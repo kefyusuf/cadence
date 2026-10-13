@@ -1,0 +1,48 @@
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+
+export default tseslint.config(
+  {
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'node_modules/**',
+      // Compiled with strict settings by scripts/verify-package.mjs instead: it imports the
+      // built package, so it can only typecheck after a build.
+      'scripts/typecheck-consumer.ts',
+    ],
+  },
+  js.configs.recommended,
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: { globals: { console: 'readonly', process: 'readonly' } },
+  },
+  {
+    files: ['**/*.ts'],
+    extends: [...tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      eqeqeq: ['error', 'always'],
+      'no-console': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+    },
+  },
+  {
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      // cursor.test.ts destructures the cursor on purpose: its state lives in closures,
+      // so detaching the methods is the behaviour under test.
+      '@typescript-eslint/unbound-method': 'off',
+      '@typescript-eslint/no-confusing-void-expression': 'off',
+    },
+  },
+  {
+    files: ['scripts/**', '*.config.ts', '*.config.cjs'],
+    rules: { 'no-console': 'off' },
+  },
+);
