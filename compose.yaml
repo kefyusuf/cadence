@@ -7,10 +7,4 @@ services:
       target: test
     profiles: ["test"]
     working_dir: /app
-    volumes:
-      - ./:/app
-      - app-node-modules:/app/node_modules
     command: ["npm", "test"]
-
-volumes:
-  app-node-modules:
