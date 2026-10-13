@@ -15,7 +15,11 @@ export default tseslint.config(
   js.configs.recommended,
   {
     files: ['**/*.{js,mjs,cjs}'],
-    languageOptions: { globals: { console: 'readonly', process: 'readonly' } },
+    // The TypeScript side gets its globals from @types/node; these are listed by hand because
+    // the ops scripts in scripts/ are plain JavaScript.
+    languageOptions: {
+      globals: { AbortController: 'readonly', console: 'readonly', process: 'readonly', setTimeout: 'readonly' },
+    },
   },
   {
     files: ['**/*.ts'],

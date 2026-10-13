@@ -8,3 +8,18 @@ services:
     profiles: ["test"]
     working_dir: /app
     command: ["npm", "test"]
+
+  # The production image, run the way it is meant to run. `docker compose run --rm --build prod`
+  # *is* the self-check: it exits 0 only if the package loads by its published name, a DST gap
+  # resolves to the right instant, and a real wait and a real abort behave. The read-only file
+  # system and the dropped capabilities are not decoration — they are what the runtime proves.
+  prod:
+    build:
+      context: .
+      target: prod
+    profiles: ["prod"]
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
