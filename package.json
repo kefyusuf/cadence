@@ -29,6 +29,7 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server/main.js",
     "verify:package": "node scripts/verify-package.mjs",
     "lint": "eslint .",
     "lint:deps": "depcruise src test scripts --config .dependency-cruiser.cjs",
@@ -46,5 +47,8 @@
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.71.2",
     "vitest": "^3.2.0"
+  },
+  "dependencies": {
+    "fastify": "^5.12.7"
   }
 }

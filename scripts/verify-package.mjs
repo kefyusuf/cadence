@@ -137,6 +137,10 @@ recordNotExportable('the internal adapter layer is not importable', 'cadence/ada
 // how this repo reads its own is not part of what a consumer may import.
 recordNotExportable('the configuration layer is not importable', 'cadence/config');
 
+// dist/server/main.js is the process entry point the image runs, and it is reachable as a file even
+// though it is not part of the surface: this checks the exports map, not the presence of a file.
+recordNotExportable('the server and composition root are not importable', 'cadence/server');
+
 record('every exports target exists', () => {
   if (!existsSync(path.join(root, 'dist'))) throw new Error('dist/ is missing, run npm run build first');
 

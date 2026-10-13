@@ -76,6 +76,13 @@ module.exports = {
       to: { path: '^src/adapters' },
     },
     {
+      name: 'nothing-inside-src-imports-the-server',
+      severity: 'error',
+      comment: 'src/server is the composition root: it may reach down into every layer, and nothing may reach up into it. An engine module that imported a route would drag the HTTP framework into the published package, and a port would stop being a port the moment it had a caller inside the layer that defines it.',
+      from: { path: '^src/(core|domain|scheduler|config|adapters)' },
+      to: { path: '^src/server' },
+    },
+    {
       name: 'src-does-not-know-dev-only-paths',
       severity: 'error',
       comment: 'Shipping code may not import tests, verification scripts or build output.',

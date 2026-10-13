@@ -4,10 +4,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 
-# What the published package needs at runtime. There are no runtime dependencies yet, and this
-# stage proves it with `npm ci --omit=dev` rather than with a comment: the install leaves no
-# node_modules behind at all, so the mkdir is what makes the COPY below a stable contract — when
-# week 4 adds Fastify the directory arrives populated and nothing here has to change.
+# What the published package needs at runtime: `fastify`, and nothing else. The claim is proven by
+# `npm ci --omit=dev` rather than by a comment — a dev tool cannot reach a container through this
+# stage. The mkdir is kept because the COPY below is a contract: if the runtime list ever goes back
+# to empty, the build still has a directory to copy and the image still says so honestly.
 FROM node:24-bookworm-slim AS deps-prod
 WORKDIR /app
 COPY package.json package-lock.json ./
