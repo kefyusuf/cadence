@@ -131,7 +131,9 @@ survive the adapters that follow it.
     No rule in the config targets `unknown` or unresolvable dependencies from `scripts/`, so the gate
     reads the same either way — but this is the kind of number that will be quoted in a week-8
     comparison, and it is only comparable inside one tree state. `test/` and `src/` are unaffected:
-    they import each other by relative path.
+    they import each other by relative path. CI confirmed the mechanism without being told to: the
+    run for this commit reported `34 modules, 59 dependencies` in all three jobs, because the
+    workflow runs `lint:deps` before `npm run build`, so its checkout has no `dist` to resolve into.
 
 10. **`src/adapters` is compiled and shipped, but not importable from outside.** The `exports` map
     gains no key for it, so `import('cadence/adapters')` fails with
@@ -151,9 +153,16 @@ survive the adapters that follow it.
 ## Consequences
 
 - Measured after this change: `110 tests` in `10 files`, `29 files` linted with 0 errors and 0
-  warnings, 0 dependency violations (`31 modules / 53 dependencies` on a tree with `dist` built,
-  `34 / 59` on one without it — decision 9a), `11` package checks, coverage `99.2%` statements /
-  `95.47%` branches / `100%` functions, with `adapters/log-notifier.ts` at `100` on all four.
+  warnings (the same 29 in the image — eslint's file count, unlike dependency-cruiser's, does not
+  depend on tree state), 0 dependency violations (`31 modules / 53 dependencies` on a tree with
+  `dist` built, `34 / 59` on one without it, and CI reported the latter — decision 9a), `11` package
+  checks.
+- Coverage is the one number with two honest values: CI on Node 22 and Node 24 both print `99.2`
+  statements / `95.49` branches / `100` functions / `99.2` lines, while the host on v26.8.2 prints
+  `95.47` branches. That is the V8 coverage provider counting branches differently per engine, not a
+  code difference — `src/adapters/log-notifier.ts` is `100 / 100 / 100 / 100` in all three. The
+  thresholds in `vitest.config.ts` (95 / 90 / 95 / 95) are what actually gate this, and they hold on
+  every version measured.
 - The adapter is **stateless**: no dedup, no idempotency key, no buffering. Two runs over the same
   span of the same rule produce the same records, and one run that crashes and restarts on a fresh
   cursor re-delivers whatever the new cursor yields. Deciding that is correct is week 12's job, and
