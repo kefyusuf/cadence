@@ -6,8 +6,11 @@ on:
   pull_request:
 
 jobs:
+  # Pinned to the image ubuntu-latest resolves to today, not to the moving label: ubuntu-latest
+  # migrates to Ubuntu 26 on 2026-10-19, and a runner image change should be a decision we make,
+  # not something that arrives mid-push.
   core:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -27,7 +30,7 @@ jobs:
       - run: npm run verify:package
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - run: docker build --target test -t cadence-test .
