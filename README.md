@@ -1,5 +1,8 @@
 # cadence
 
+![CI](https://github.com/kefyusuf/cadence/actions/workflows/ci.yml/badge.svg)
+![coverage](https://img.shields.io/badge/coverage-98%25%20stmts-green)
+
 A recurring-schedule engine and team board. The part that is hard is the part that is
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
