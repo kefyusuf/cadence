@@ -121,6 +121,18 @@ record('deep import "cadence/src/..." is blocked', () =>
   ),
 );
 
+// src/adapters is repo-internal: it is compiled into dist and travels in the tarball, but the
+// exports map has no key for it, so a consumer cannot reach it without a decision being made.
+record('the internal adapter layer is not importable', () =>
+  runNode(
+    'module',
+    `let code = 'no error';
+     try { await import('cadence/adapters'); } catch (error) { code = error.code }
+     if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('cadence/adapters behaved as: ' + code);
+     console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
+  ),
+);
+
 record('every exports target exists', () => {
   if (!existsSync(path.join(root, 'dist'))) throw new Error('dist/ is missing, run npm run build first');
 

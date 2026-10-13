@@ -48,6 +48,13 @@ module.exports = {
       to: { path: '^src/scheduler' },
     },
     {
+      name: 'core-domain-scheduler-do-not-know-adapters',
+      severity: 'error',
+      comment: 'Hexagonal direction: adapters depend on the core, never the reverse. An import from src/adapters into core, domain or scheduler would give the reusable engine a dependency on the outside world.',
+      from: { path: '^src/(core|domain|scheduler)' },
+      to: { path: '^src/adapters' },
+    },
+    {
       name: 'src-does-not-know-dev-only-paths',
       severity: 'error',
       comment: 'Shipping code may not import tests, verification scripts or build output.',
