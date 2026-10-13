@@ -1,0 +1,9 @@
+node_modules
+coverage
+dist
+.git
+.github
+Dockerfile
+compose.yaml
+*.log
+.env

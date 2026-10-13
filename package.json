@@ -1,0 +1,22 @@
+{
+  "name": "cadence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Recurring schedule engine and team board: wall-clock correct recurrence, event-driven state, hexagonal core.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
