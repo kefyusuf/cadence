@@ -1,4 +1,5 @@
 import { CadenceError } from './errors.js';
+import { fromThrowable, type Result } from './result.js';
 import { assertInstant, instantFromWallClock, wallClockAt, type Disambiguation, type WallClock } from './clock.js';
 
 export type Frequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
@@ -182,40 +183,56 @@ function* periodWalls(rec: Normalized, anchor: WallClock, period: number): Gener
   }
 }
 
-export function nextOccurrence(recurrence: Recurrence, after: number): Occurrence | null {
+/**
+ * The series as a lazy sequence, starting at the anchor. Validation and the anchor read
+ * happen eagerly so a broken rule fails when the series is created, not on first pull.
+ */
+export function occurrences(recurrence: Recurrence): Generator<Occurrence, void> {
   const rec = normalize(recurrence);
-  const afterInstant = assertInstant(after, 'after');
   const anchor = wallClockAt(rec.dtStart, rec.tz);
 
-  let index = 0;
-  let examined = 0;
+  function* walk(): Generator<Occurrence, void> {
+    let index = 0;
+    let examined = 0;
 
-  for (let period = 0; ; period += 1) {
-    let produced = 0;
+    for (let period = 0; ; period += 1) {
+      let produced = 0;
 
-    for (const wall of periodWalls(rec, anchor, period)) {
-      produced += 1;
-      examined += 1;
-      if (examined > MAX_CANDIDATES) {
-        throw new CadenceError('SEARCH_EXHAUSTED', `Gave up after ${String(MAX_CANDIDATES)} candidate occurrences`);
+      for (const wall of periodWalls(rec, anchor, period)) {
+        produced += 1;
+        examined += 1;
+        if (examined > MAX_CANDIDATES) {
+          throw new CadenceError('SEARCH_EXHAUSTED', `Gave up after ${String(MAX_CANDIDATES)} candidate occurrences`);
+        }
+
+        const resolved = instantFromWallClock(wall, rec.tz);
+        yield { instant: resolved.instant, targetWall: wall, index, disambiguation: resolved.disambiguation };
+        index += 1;
       }
 
-      const resolved = instantFromWallClock(wall, rec.tz);
-      if (resolved.instant > afterInstant) {
-        return {
-          instant: resolved.instant,
-          targetWall: wall,
-          index,
-          disambiguation: resolved.disambiguation,
-        };
+      if (rec.count !== null && index >= rec.count) return;
+
+      if (produced === 0 && period > 4000) {
+        throw new CadenceError('SEARCH_EXHAUSTED', 'Recurrence produced no candidate occurrences in 4000 periods');
       }
-      index += 1;
-    }
-
-    if (rec.count !== null && index >= rec.count) return null;
-
-    if (produced === 0 && period > 4000) {
-      throw new CadenceError('SEARCH_EXHAUSTED', 'Recurrence produced no candidate occurrences in 4000 periods');
     }
   }
+
+  return walk();
+}
+
+/** The first occurrence strictly after `after`, or null when the series is bounded. */
+export function nextOccurrence(recurrence: Recurrence, after: number): Occurrence | null {
+  const afterInstant = assertInstant(after, 'after');
+
+  for (const occurrence of occurrences(recurrence)) {
+    if (occurrence.instant > afterInstant) return occurrence;
+  }
+
+  return null;
+}
+
+/** `nextOccurrence` for callers that want a value instead of an exception. */
+export function tryNextOccurrence(recurrence: Recurrence, after: number): Result<Occurrence | null, CadenceError> {
+  return fromThrowable(() => nextOccurrence(recurrence, after));
 }
