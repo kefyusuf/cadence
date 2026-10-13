@@ -138,7 +138,8 @@ survive the adapters that follow it.
 10. **`src/adapters` is compiled and shipped, but not importable from outside.** The `exports` map
     gains no key for it, so `import('cadence/adapters')` fails with
     `ERR_PACKAGE_PATH_NOT_EXPORTED` — now the 11th `npm run verify:package` check, next to the
-    existing deep-import check. It still travels in the tarball (`58 files`) because `files` allowlists
+    existing deep-import check. It still travels in the tarball (58 files at that moment; 66 once the
+    configuration layer was added the same way — ADR 0007 decision 12) because `files` allowlists
     `dist`. The asymmetry is deliberate: publishing a type is a contract decision, and the adapter's
     surface — `NotifierRecord`, `NotifierSink` — becomes API only when something outside this repo
     needs to build a sink. Until then the repo imports it by relative path, and the gate in decision

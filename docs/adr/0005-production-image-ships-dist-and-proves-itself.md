@@ -28,8 +28,10 @@ at runtime, and what would have to be true for a health check to mean something"
    happened to leave behind — `dist` is in `.dockerignore` precisely so that a stale host build
    cannot leak into the context.
    Measured contents of `/app` in the prod image: `dist` (52 files), `package.json`, `README.md`,
-   `node_modules`, `scripts/selfcheck.mjs` — 272K on disk. Remeasured after the first adapter landed:
-   56 files, 296K (ADR 0006 adds four files under `dist/adapters`); the image itself is still 330MB.
+   `node_modules`, `scripts/selfcheck.mjs` — 272K on disk. That file count grows with every layer
+   that ships: 56 with the first adapter, 64 with the configuration layer, and `du -sh /app` read
+   332K at the last remeasurement. The claim worth keeping here is the *set* of entries and who owns
+   them, not the count; each ADR records the numbers it measured.
 
 2. **The runtime install is `npm ci --omit=dev`, and the interesting part is what it installed.**
    The first build of `prod` failed with
@@ -116,8 +118,9 @@ at runtime, and what would have to be true for a health check to mean something"
 
 ## Consequences
 
-- `cadence-prod` is 330MB against `cadence-test`'s 448MB. The difference is the dev tree, and the
-  prod image is the one that has to be re-examined when a runtime dependency first appears.
+- `cadence-prod` was 330MB against `cadence-test`'s 448MB, and the prod image still reports 330MB
+  four layers later. The difference is the dev tree, and the prod image is the one that has to be
+  re-examined when a runtime dependency first appears.
 - The self-check is **not** covered by vitest. Nothing in `npm test` runs it, so a check that
   asserts the wrong thing keeps CI green — decision 6 is the example of how that shows up: only by
   running it. It is executed in CI inside the image, which is the only honest seam for it.

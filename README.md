@@ -7,11 +7,11 @@ A recurring-schedule engine and team board. The part that is hard is the part th
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** week 3 of a build-in-public schedule — core engine, domain vocabulary, package surface,
-the layering gates that keep them apart, the first async layer that waits for an occurrence instead
-of just computing it, a production image that checks itself, and the first adapter implementing one
-of the domain ports. The HTTP API, board UI, cache, queue and observability layers come later; see
-`docs/adr/`.
+**Status:** week 4 of a build-in-public schedule — core engine, domain vocabulary, package surface,
+the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
+computing it, a production image that checks itself, the first adapter implementing a domain port,
+and the configuration layer that reads the environment in one place. The HTTP API, board UI, cache,
+queue and observability layers come next; see `docs/adr/`.
 
 ## What it does today
 
@@ -82,12 +82,32 @@ steps 23h then 24h across the spring gap. A sink that throws costs the occurrenc
 The reasoning, including the `bindNotifier` helper that was rejected, is in
 [ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md).
 
+Configuration is read in exactly one place and validated by a function that never touches the
+platform, so the rules are testable and a typo cannot reach `listen()`:
+
+```ts
+import { loadAppConfig } from './src/adapters/env-config.js'; // also repo-internal
+
+loadAppConfig({ HOST: 'localhost:3000', PORT: '8O80', LOG_LEVEL: 'verbose' });
+// CadenceError INVALID_CONFIG, one message naming all three:
+//   config refused: HOST looks like host:port — set PORT separately, got "localhost:3000";
+//   PORT must be a plain decimal number, got "8O80";
+//   LOG_LEVEL must be one of fatal, error, warn, info, debug, trace, got "verbose"
+
+loadAppConfig({});
+// { ok: true, value: { host: '127.0.0.1', port: 3000, logLevel: 'info', environment: 'development' } }
+```
+
+`8O80` is the case the layer exists for: `Number('8O80')` is `NaN`, and `NaN` passed to `listen()`
+means "bind a random port". Unset means the safe default — loopback, not every interface. See
+[ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md).
+
 Three entry points, nothing else: `cadence` (recurrence engine, zero dependencies, no I/O),
 `cadence/domain` (branded ids, board types, ports for the adapters that mostly do not exist yet) and
-`cadence/scheduler` (`sleep` and `runSeries` — the only layer that waits). `src/adapters` is
-compiled into `dist` and ships in the tarball, but the `exports` map has no key for it, so it is
-internal until publishing it is a decision. `cadence/src/...` is closed, and CommonJS can
-`require()` all three on Node >= 22.12 — the reasoning is in
+`cadence/scheduler` (`sleep` and `runSeries` — the only layer that waits). `src/adapters` and
+`src/config` are compiled into `dist` and ship in the tarball, but the `exports` map has no key for
+either, so they stay internal until publishing them is a decision. `cadence/src/...` is closed, and
+CommonJS can `require()` all three on Node >= 22.12 — the reasoning is in
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md).
 
 Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recurrence-over-epoch-arithmetic.md)
@@ -95,7 +115,8 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md) (package shape),
 [ADR 0004](docs/adr/0004-cancellation-is-a-value-and-the-clock-is-an-argument.md) (waiting),
 [ADR 0005](docs/adr/0005-production-image-ships-dist-and-proves-itself.md) (the production image),
-[ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md) (the first adapter).
+[ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md) (the first adapter),
+[ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md) (configuration).
 
 ## Run it
 
@@ -104,12 +125,12 @@ All of this is green on the host and inside the image CI uses:
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (29 files)
-npm run lint:deps     # dependency-cruiser: core, domain and scheduler import no packages, no builtins and no adapters, and nothing in core or domain reaches the scheduler
-npm test              # 110 tests, wall-clock recurrence, DST transitions, cancellation, the notifier
-npm run test:coverage # 99% statements / 95% branches / 100% functions, gated in vitest.config.ts
+npm run lint          # eslint flat config, type-aware (33 files)
+npm run lint:deps     # dependency-cruiser: core, domain, scheduler and config import no packages, no builtins and no adapters, and none of the three reaches config or the scheduler
+npm test              # 133 tests, wall-clock recurrence, DST transitions, cancellation, the notifier, configuration
+npm run test:coverage # 99% statements / 96% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
-npm run verify:package # 11 checks against the built package, not the source tree
+npm run verify:package # 12 checks against the built package, not the source tree
 ```
 
 ```sh
@@ -148,27 +169,35 @@ src/core/      clock.ts (wall <-> instant), recurrence.ts (rule -> occurrence),
                cursor.ts, errors.ts, result.ts, index.ts
 src/domain/    ids.ts (branded ids + parseId), model.ts, ports.ts (the shapes adapters implement)
 src/scheduler/ sleep.ts (a cancellable wait), run-series.ts (walk a cursor in due order), index.ts
+src/config/    app-config.ts (AppConfig and the rules that produce it — takes a record, never
+               reads the platform)
 src/adapters/  log-notifier.ts (a ScheduleNotifier that renders one record per occurrence and hands
-               it to an injected sink) — internal: dist has it, the exports map does not
-test/          behaviour, DST transitions, validation, cancellation, public surface
+               it to an injected sink), env-config.ts (the one file that reads process.env) —
+               internal: dist has them, the exports map does not
+test/          behaviour, DST transitions, validation, cancellation, configuration, public surface
 scripts/       verify-package.mjs (the package surface), typecheck-consumer.ts,
                selfcheck.mjs (what the prod image runs as CMD and HEALTHCHECK)
 Dockerfile     deps -> deps-prod -> build -> test -> prod
 docs/adr/      decisions with their consequences
 ```
 
-`src/core`, `src/domain` and `src/scheduler` import no packages and no Node builtins, neither
-`src/core` nor `src/domain` may reach the scheduler, and none of the three may import
-`src/adapters` — enforced by `npm run lint:deps`, not by a comment. That is what makes the edge
-cases cheap to test, keeps the engine usable from a browser bundle later, and is the reason an
-adapter can be swapped without the engine noticing.
+`src/core`, `src/domain`, `src/scheduler` and `src/config` import no packages and no Node builtins,
+neither `src/core` nor `src/domain` may reach the scheduler, none of the three may import
+`src/adapters` or `src/config`, and only `src/adapters` may touch the `process` global — enforced by
+`npm run lint:deps` and `npm run lint`, not by a comment. That is what makes the edge cases cheap to
+test, keeps the engine usable from a browser bundle later, and is the reason an adapter can be
+swapped without the engine noticing.
 
 ## Not yet
 
-One adapter exists. Of the ports in `src/domain/ports.ts`, `ScheduleNotifier` has an implementation
-and `Clock`, `IdGenerator`, `BoardStore` and `WorkItemStore` do not; persistence, the HTTP surface,
-board UI, caching, queueing and metrics are all still to come. Each lands with its own test seam
-rather than as scaffolding.
+Two adapters exist — the notifier and the environment reader. Of the ports in `src/domain/ports.ts`,
+`ScheduleNotifier` has an implementation and `Clock`, `IdGenerator`, `BoardStore` and `WorkItemStore`
+do not; the HTTP surface, board UI, persistence, caching, queueing and metrics are all still to come.
+Each lands with its own test seam rather than as scaffolding.
+
+The configuration layer knows four variables. It deliberately ignores everything else, which means a
+misspelled name (`PTOR=8080`) boots with the default rather than warning — the startup log line that
+echoes the resolved config is the fix, and it arrives with the server.
 
 Delivery is at-most-once: `runSeries` advances the cursor before it notifies, so a sink that throws
 loses that occurrence and a retry replays from the next one. Making that at-least-once needs stored
