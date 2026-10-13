@@ -43,10 +43,10 @@ export function parseAppConfig(values: StringRecord): Result<AppConfig, CadenceE
   const problems: string[] = [];
 
   const config: AppConfig = {
-    host: readHost(provided(values, 'HOST'), problems),
-    port: readPort(provided(values, 'PORT'), problems),
-    logLevel: readEnum(provided(values, 'LOG_LEVEL'), LOG_LEVELS, DEFAULTS.logLevel, 'LOG_LEVEL', problems),
-    environment: readEnum(provided(values, 'NODE_ENV'), ENVIRONMENTS, DEFAULTS.environment, 'NODE_ENV', problems),
+    host: readHost(readSetting(values, 'HOST'), problems),
+    port: readPort(readSetting(values, 'PORT'), problems),
+    logLevel: readEnum(readSetting(values, 'LOG_LEVEL'), LOG_LEVELS, DEFAULTS.logLevel, 'LOG_LEVEL', problems),
+    environment: readEnum(readSetting(values, 'NODE_ENV'), ENVIRONMENTS, DEFAULTS.environment, 'NODE_ENV', problems),
   };
 
   if (problems.length > 0) {
@@ -56,8 +56,8 @@ export function parseAppConfig(values: StringRecord): Result<AppConfig, CadenceE
   return ok(config);
 }
 
-/** An empty value means "not set", because `HOST=` is what a compose file or a shell produces. */
-function provided(values: StringRecord, key: string): string | undefined {
+/** Reads one variable, treating an empty value as absent: `HOST=` is what a compose file or a shell produces. */
+function readSetting(values: StringRecord, key: string): string | undefined {
   const raw = values[key];
   return raw === undefined || raw === '' ? undefined : raw;
 }

@@ -111,39 +111,31 @@ record('cjs: require("cadence/scheduler")', () =>
   ),
 );
 
-record('deep import "cadence/src/..." is blocked', () =>
-  runNode(
-    'module',
-    `let code = 'no error';
-     try { await import('cadence/src/core/recurrence.js'); } catch (error) { code = error.code }
-     if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('deep import behaved as: ' + code);
-     console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
-  ),
+/** Refused by the exports map, rather than by a missing file: that is what the error code distinguishes. */
+function recordNotExportable(name, specifier) {
+  record(name, () =>
+    runNode(
+      'module',
+      `let code = 'no error';
+       try { await import('${specifier}'); } catch (error) { code = error.code }
+       if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('${specifier} behaved as: ' + code);
+       console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
+    ),
+  );
+}
+
+recordNotExportable(
+  'deep import "cadence/src/..." is blocked',
+  'cadence/src/core/recurrence.js',
 );
 
 // src/adapters is repo-internal: it is compiled into dist and travels in the tarball, but the
 // exports map has no key for it, so a consumer cannot reach it without a decision being made.
-record('the internal adapter layer is not importable', () =>
-  runNode(
-    'module',
-    `let code = 'no error';
-     try { await import('cadence/adapters'); } catch (error) { code = error.code }
-     if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('cadence/adapters behaved as: ' + code);
-     console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
-  ),
-);
+recordNotExportable('the internal adapter layer is not importable', 'cadence/adapters');
 
 // Same reasoning for the configuration layer: the engine must not need an environment to run, so
 // how this repo reads its own is not part of what a consumer may import.
-record('the configuration layer is not importable', () =>
-  runNode(
-    'module',
-    `let code = 'no error';
-     try { await import('cadence/config'); } catch (error) { code = error.code }
-     if (code !== 'ERR_PACKAGE_PATH_NOT_EXPORTED') throw new Error('cadence/config behaved as: ' + code);
-     console.log('ok, ERR_PACKAGE_PATH_NOT_EXPORTED')`,
-  ),
-);
+recordNotExportable('the configuration layer is not importable', 'cadence/config');
 
 record('every exports target exists', () => {
   if (!existsSync(path.join(root, 'dist'))) throw new Error('dist/ is missing, run npm run build first');
