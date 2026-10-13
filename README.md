@@ -125,9 +125,9 @@ All of this is green on the host and inside the image CI uses:
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (33 files)
+npm run lint          # eslint flat config, type-aware (35 files)
 npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters, and core, domain and scheduler do not reach src/config either
-npm test              # 133 tests, wall-clock recurrence, DST transitions, cancellation, the notifier, configuration
+npm test              # 148 tests, wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores
 npm run test:coverage # 99% statements / 96% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 12 checks against the built package, not the source tree
@@ -172,8 +172,9 @@ src/scheduler/ sleep.ts (a cancellable wait), run-series.ts (walk a cursor in du
 src/config/    app-config.ts (AppConfig and the rules that produce it — takes a record, never
                reads the platform)
 src/adapters/  log-notifier.ts (a ScheduleNotifier that renders one record per occurrence and hands
-               it to an injected sink), env-config.ts (the one file that reads process.env) —
-               internal: dist has them, the exports map does not
+               it to an injected sink), env-config.ts (the one file that reads process.env),
+               memory-store.ts (BoardStore and WorkItemStore over one pool, copying on the way in
+               and the way out) — internal: dist has them, the exports map does not
 test/          behaviour, DST transitions, validation, cancellation, configuration, public surface
 scripts/       verify-package.mjs (the package surface), typecheck-consumer.ts,
                selfcheck.mjs (what the prod image runs as CMD and HEALTHCHECK)
@@ -192,9 +193,11 @@ swapped without the engine noticing.
 
 ## Not yet
 
-Two adapters exist — the notifier and the environment reader. Of the ports in `src/domain/ports.ts`,
-`ScheduleNotifier` has an implementation and `Clock`, `IdGenerator`, `BoardStore` and `WorkItemStore`
-do not; the HTTP surface, board UI, persistence, caching, queueing and metrics are all still to come.
+Three adapters exist — the notifier, the environment reader and the in-memory stores. Of the ports in
+`src/domain/ports.ts`, `ScheduleNotifier`, `BoardStore` and `WorkItemStore` have implementations and
+`Clock` and `IdGenerator` do not; the HTTP surface, board UI, durable persistence, caching, queueing
+and metrics are all still to come. The in-memory stores are the seam the HTTP layer is built against,
+not the persistence story: everything they hold is gone when the process is.
 Each lands with its own test seam rather than as scaffolding.
 
 The configuration layer knows four variables. It deliberately ignores everything else, which means a

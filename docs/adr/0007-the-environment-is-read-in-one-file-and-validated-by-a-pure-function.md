@@ -122,14 +122,16 @@ layers, and what has to be true for that placement to survive the next layer add
     `KNOWN_CODES` set, so a config error that crosses a worker or a duplicated module copy keeps its
     code.
 
-12. **`cadence/config` is not exported.** `dist/config` ships in the tarball (66 files) but
+12. **`cadence/config` is not exported.** `dist/config` ships in the tarball — built, packed, and
+    simply not reachable — but
     `import('cadence/config')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`, now the 12th
     `npm run verify:package` check — the same asymmetry as `src/adapters`: the *shape* of a
     configuration record is not something a consumer may couple to until there is a reason.
 
 ## Consequences
 
-- Measured after this change: `133 tests` in `12 files`, `33 files` linted with 0 errors and 0
+- Measured after this change — these belong to this slice, and every later slice moves them; the
+  README carries the current totals: `133 tests` in `12 files`, `33 files` linted with 0 errors and 0
   warnings, 0 dependency violations (`35 modules / 61 dependencies` with `dist` present, `38 / 67`
   without it — the drift ADR 0006 decision 9a documents), `12` package checks, coverage
   `99.31` statements / `96.07` branches / `100` functions / `99.31` lines on both Node 24.21.0 in the
