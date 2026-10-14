@@ -36,17 +36,34 @@ USER node
 CMD ["npm", "test"]
 
 
-# dist and the self-check only, built from the stages above. Everything here is root-owned on
-# purpose: the runtime user reads the code it executes and cannot rewrite it, which is also why
-# the container runs with --read-only in compose and in CI.
+# dist, the runtime dependency and the self-check only, built from the stages above. Everything here is
+# root-owned on purpose: the runtime user reads the code it executes and cannot rewrite it, which is also
+# why the container runs with --read-only in compose and in CI.
 FROM node:24-bookworm-slim AS prod
 ENV NODE_ENV=production
+# The one place the bind address is not loopback. Inside a container `127.0.0.1` is reachable only from
+# the container itself, so a service that is meant to be published has to answer on every interface and
+# let the runtime decide which of them is exposed — `compose.yaml` maps it to the host's loopback.
+ENV HOST=0.0.0.0
+ENV PORT=3000
+EXPOSE 3000
 WORKDIR /app
 COPY --from=build /app/dist ./dist
 COPY --from=deps-prod /app/node_modules ./node_modules
 COPY package.json README.md ./
 COPY scripts/selfcheck.mjs ./scripts/
 USER node
+
+# The package surface is proven while the image is built, because the command the container runs is now
+# the service rather than the proof: this exits non-zero, and fails the build, if `import('cadence')` does
+# not resolve by its published name, if dev tooling reached the runtime layer, or if a DST gap resolves to
+# the wrong instant. It runs as the runtime user, so a file the `node` user could not read is a build
+# failure rather than a container that starts and then cannot serve.
+RUN node scripts/selfcheck.mjs
+
+# An HTTP probe, not a process check: the service is healthy when the route the load balancer would call
+# answers. Shell form because the port comes from the environment above, and node's global fetch because
+# this image installs no curl.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD ["node", "scripts/selfcheck.mjs"]
-CMD ["node", "scripts/selfcheck.mjs"]
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||'3000')+'/healthz').then((r)=>process.exit(r.ok?0:1),()=>process.exit(1))"
+CMD ["node", "dist/server/main.js"]

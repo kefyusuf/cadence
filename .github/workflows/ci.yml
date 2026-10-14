@@ -37,20 +37,34 @@ jobs:
       - run: docker run --rm cadence-test npm test
       - run: docker run --rm cadence-test sh -c "npm run lint && npm run lint:deps && npm run build && npm run verify:package"
       - run: docker build --target prod -t cadence-prod .
-      - name: the prod image runs read-only, unprivileged and without capabilities
-        run: docker run --rm --read-only --cap-drop=ALL --security-opt no-new-privileges:true cadence-prod
-      - name: the prod image's own HEALTHCHECK turns healthy
+      # One container, all three hardening flags, and the command is the service: this is the same proof
+      # the short-lived self-check run used to give, now given by a process that has to stay up. The
+      # health probe is the image's own, which asks `GET /healthz` over loopback — so `healthy` means the
+      # route answered, not that the process exists.
+      - name: the prod image serves read-only, unprivileged and without capabilities
         run: |
-          docker run -d --name cadence-health --read-only \
-            --health-interval=1s --health-start-period=1s --health-retries=3 \
-            cadence-prod node -e "setInterval(() => {}, 1000)" > /dev/null
+          docker run -d --name cadence-prod-check --read-only --cap-drop=ALL \
+            --security-opt no-new-privileges:true \
+            --health-interval=1s --health-start-period=1s --health-retries=3 cadence-prod > /dev/null
+          status=none
           for attempt in $(seq 1 30); do
-            status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' cadence-health)
+            status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' cadence-prod-check)
             echo "health after ${attempt}s: ${status}"
-            if [ "${status}" = "healthy" ]; then exit 0; fi
+            if [ "${status}" = "healthy" ]; then break; fi
             sleep 1
           done
-          docker inspect --format '{{json .State.Health}}' cadence-health
-          exit 1
+          if [ "${status}" != "healthy" ]; then
+            docker inspect --format '{{json .State.Health}}' cadence-prod-check
+            exit 1
+          fi
+      # The discriminator is the exit code: a process that handles SIGTERM and closes the server exits 0,
+      # and one that had to be killed by the grace period exits 137.
+      - name: a stop request ends the service by itself
+        run: |
+          docker stop --time 5 cadence-prod-check > /dev/null
+          docker logs cadence-prod-check 2>&1 | tail -3
+          exit_code=$(docker inspect --format '{{.State.ExitCode}}' cadence-prod-check)
+          echo "exit code after SIGTERM: ${exit_code}"
+          test "${exit_code}" = "0"
       - if: always()
-        run: docker rm -f cadence-health > /dev/null || true
+        run: docker rm -f cadence-prod-check > /dev/null || true

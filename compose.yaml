@@ -9,10 +9,12 @@ services:
     working_dir: /app
     command: ["npm", "test"]
 
-  # The production image, run the way it is meant to run. `docker compose run --rm --build prod`
-  # *is* the self-check: it exits 0 only if the package loads by its published name, a DST gap
-  # resolves to the right instant, and a real wait and a real abort behave. The read-only file
-  # system and the dropped capabilities are not decoration — they are what the runtime proves.
+  # The production image, run the way it is meant to run: the Fastify process as PID 1, published on the
+  # host's loopback only. The image's own HEALTHCHECK decides whether it is up — it asks the same route a
+  # load balancer would. `docker compose stop prod` is the graceful shutdown: SIGTERM goes in, the server
+  # stops accepting and drains, the process exits 0. The read-only file system and the dropped
+  # capabilities are not decoration, they are what the service runs under; and the self-check that proves
+  # the package surface now runs during `docker build` rather than as this service's command.
   prod:
     build:
       context: .
@@ -23,3 +25,5 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    ports:
+      - "127.0.0.1:3000:3000"
