@@ -7,12 +7,14 @@ A recurring-schedule engine and team board. The part that is hard is the part th
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** week 4 of a build-in-public schedule — core engine, domain vocabulary, package surface,
+**Status:** week 5 of a build-in-public schedule — core engine, domain vocabulary, package surface,
 the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
 computing it, the adapters that implement the domain ports, the configuration layer that reads the
-environment in one place, the HTTP API in front of all of it, and the container that runs it as a
-service: an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out. The board UI, cache,
-queue and observability layers come next; see `docs/adr/`.
+environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
+an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, first of week 5, the
+measurements of what a stream wrapped around the lazy engine actually pulls, taken before the route
+that would use one is written. The board UI, cache, queue and observability layers come next; see
+`docs/adr/`.
 
 ## What it does today
 
@@ -153,6 +155,28 @@ they stay internal until publishing them is a decision. `cadence/src/...` is clo
 CommonJS can `require()` all three on Node >= 22.12 — the reasoning is in
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md).
 
+Week 5's first slice adds no product code: it measures what a `Readable` does *around* an engine that is
+already lazy, because the next route — a board exported as NDJSON — is the first consumer that can stop,
+fail or go slow. One `read()` pulls exactly `highWaterMark` engine steps and hands back one of them, then
+refills one row per tick. `Readable.from(iterable)` defaults to `objectMode: true` with `highWaterMark: 1`
+— not `new Readable()`'s default and not `new Readable({objectMode: true})`'s — and that pair is identical
+on the host's v26.8.2 and in `node:22.23.3`, `node:24.21.0` and `node:26.11.1`, while the *byte* default is
+not (65536 in the images, 16384 on v26.8.2). The shape that decides the route is a bare `resume()` on a
+`DAILY` rule with no `count`: it walked 200000 candidate occurrences — the engine's own `MAX_CANDIDATES`
+guard, about 547 years of daily occurrences — in 4614.5 ms on the host (4379 ms on an earlier run of the
+same script) and 4360.8 ms inside `cadence-test`,
+and a 1 ms interval registered before it fired 6 times (host) and 57 times (image) instead of about 4500,
+because the pull never yielded to the timer phase. Politeness to the event loop comes from the consumer
+asking, not from the stream. `test/stream-semantics.test.ts` pins the bounded version of every one of those
+numbers — 20 tests that count engine steps and event order rather than wall time, so they hold on all three
+runtimes — including the five teardown paths (`destroy()`, `destroy(err)`, `break` in `for await`, a
+throwing consumer, and a stream nobody ever read, which has no `finally` to reach), the defaults in
+decision 2, both `write()`-return loops, and the fact that an `AbortSignal` changes nothing until the route
+wires it to `destroy()` itself. `stream.destroyOnAbort` is `undefined` on every runtime the probe checked —
+v26.8.2, `node:22.23.3`, `node:24.21.0`, `node:26.11.1` — which is a fact about those runtimes, recorded in
+the ADR rather than asserted by a test. Reasoning and the full number tables:
+[ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md).
+
 Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recurrence-over-epoch-arithmetic.md)
 (wall-clock arithmetic), [ADR 0002](docs/adr/0002-throw-inside-result-at-the-boundary.md) (errors),
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md) (package shape),
@@ -161,21 +185,22 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md) (the first adapter),
 [ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md) (configuration),
 [ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md) (the HTTP layer),
-[ADR 0009](docs/adr/0009-the-containers-command-is-the-service-and-a-service-is-proved-by-the-request-it-answers.md) (the running service and its signals).
+[ADR 0009](docs/adr/0009-the-containers-command-is-the-service-and-a-service-is-proved-by-the-request-it-answers.md) (the running service and its signals),
+[ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured).
 
 ## Run it
 
 All of this is green on the host (Node v26.8.2), inside the image CI builds (Node 24.21.0) and in a
-clean `node:22-bookworm-slim` container with this tree copied in — the same 193 tests, 13 package
-checks and coverage line on all three:
+clean `node:22-bookworm-slim` container with this tree copied in — the same 213 tests in 19 files, 13
+package checks and coverage line on all three:
 
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (47 files, 0 errors, 0 warnings)
-npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either
-npm test              # 193 tests in 18 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path
-npm run test:coverage # 99.52% statements / 97.44% branches / 100% functions, gated in vitest.config.ts
+npm run lint          # eslint flat config, type-aware (48 files, 0 errors, 0 warnings)
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 52 modules / 89 dependencies with dist present and 55 / 95 without it
+npm test              # 213 tests in 19 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine
+npm run test:coverage # 99.52% statements / 97.45% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 13 checks against the built package, not the source tree
 npm start             # node dist/server/main.js — needs the build above, and reads HOST/PORT/LOG_LEVEL
@@ -266,7 +291,8 @@ src/server/    requests.ts (one body in, validated by the engine, not re-derived
                signal and lets go of every listener it attached), main.ts (the composition root: the
                only file that reads the configuration, binds, and waits to be asked to stop) — internal
                too, and the only layer that may reach every other
-test/          behaviour, DST transitions, validation, cancellation, configuration, public surface
+test/          behaviour, DST transitions, validation, cancellation, configuration, public surface,
+               the stream semantics a route would inherit (pull-ahead, teardown, backpressure)
 scripts/       verify-package.mjs (the package surface), typecheck-consumer.ts,
                selfcheck.mjs (the prod image's last build step, run as its runtime user)
 Dockerfile     deps -> deps-prod -> build -> test -> prod
@@ -318,7 +344,12 @@ loses that occurrence and a retry replays from the next one. Making that at-leas
 progress and a retry — week 12, not a wrapper around the notifier.
 
 The scheduler is not wired to the API yet: a work item can carry a rule, and the routes will refuse a bad
-one, but nothing walks the cursor the store holds.
+one, but nothing walks the cursor the store holds. Week 5's second slice is `GET /boards/:id/export` —
+NDJSON, one row per occurrence — built against ADR 0010's decisions rather than around them: a
+demand-driven `_read` over a cursor, object mode with an explicit `highWaterMark`, a per-item bound taken
+from the request, `destroy()` wired to the request's close, and `write()`'s return honoured. That route
+will also be the first streamed body to cross a real socket, and the probe deliberately did not measure
+what Fastify's `reply` does when a client disappears mid-body; its answer belongs in that slice.
 
 The service now answers when it is asked to stop, and that is as far as the proof goes. **In-flight
 requests are not shown to drain** — `app.close()` is what drains them and the idle-socket test is what
