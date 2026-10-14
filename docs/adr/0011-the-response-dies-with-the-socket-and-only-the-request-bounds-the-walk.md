@@ -252,10 +252,20 @@ engine work did not, which is the finding rather than a nuisance.
   before its build and `56 / 98` after it, the same coverage line, `13` checks, tarball `102 files / 50168`
   bytes.
 - **The byte figure belongs to the packer, not to the tree.** The three environments above agree on
-  `102 files` and disagree on bytes — `50156` on the host, `50168` in both Linux containers — with the two
+  `102 files` and disagree on bytes — `50156` on the host, `50168` in both local Linux containers — with the two
   Linux runs identical to each other. That gap is gzip, not content. `package.json`'s `files` list is `dist`
   and `README.md`, so `docs/` (this file included) never enters the tarball and editing an ADR cannot move the
   number; only the README can. The file count is the claim.
+- **The CI run repeated the contract, and its byte figure followed the call, not the OS.** Run `38626828754`
+  (a `push` of this commit, `success`, three jobs `core (22)` / `core (24)` / `docker` all on `ubuntu-24.04`,
+  `0` failed and `0` skipped steps, `0` annotations on every check-run): `21 files / 243 tests` and the same
+  coverage line `99.58 / 97.94 / 100 / 99.58` in all three jobs, `lint:deps` at the without-`dist` pair
+  `59 / 104` (it runs before `build` in the matrix, so this is decision (a) of ADR 0010's consequences, not a
+  contradiction of the host's `56 / 98`), and `verify:package` at `7 targets` and a `102 files` tarball. The
+  byte figure it printed was `50156` — the host's number, from a Linux runner, not the `50168` the two local
+  Linux containers produced. That is the sharper form of the sentence above: the bytes track the invocation
+  and its compressor, not the operating system, which is exactly why the claim this document makes is `102
+  files` and every byte pair here is labelled with where it was run.
 - **The socket tests are one connection per assertion, and that is a test-shape rule this slice earned**
   (decision 10). A `fetch` whose body is cancelled is not a tidy way to ask for headers: on Linux it can leave
   the response open, and the next request on the same test then makes `app.close()` wait for it until the hook
