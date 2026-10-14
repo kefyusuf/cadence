@@ -11,10 +11,10 @@ year when that wall-clock time either does not exist or happens twice.
 the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
 computing it, the adapters that implement the domain ports, the configuration layer that reads the
 environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
-an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, first of week 5, the
-measurements of what a stream wrapped around the lazy engine actually pulls, taken before the route
-that would use one is written. The board UI, cache, queue and observability layers come next; see
-`docs/adr/`.
+an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, both halves of week 5,
+streams over the lazy engine: first the measurements of what a `Readable` actually pulls, then the route
+those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it. The board
+UI, cache, queue and observability layers come next; see `docs/adr/`.
 
 ## What it does today
 
@@ -105,7 +105,7 @@ loadAppConfig({});
 means "bind a random port". Unset means the safe default — loopback, not every interface. See
 [ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md).
 
-The API is the layer all of the above was built for: seven routes over the two stores and the engine.
+The API is the layer all of the above was built for: eight routes over the two stores and the engine.
 `createApp(deps)` takes the boards store, the work-item store, the clock and the logger switch, and
 returns an application that does not listen; `src/server/main.ts` is the one file that reads the
 configuration, binds, and waits for the process to be asked to stop. Every handler *throws*, and one
@@ -147,6 +147,48 @@ failure nobody threw — a store whose pool is closed — answers 500 `INTERNAL`
 message withheld. Reasoning, including the two core defects this boundary found and where they were
 fixed, is in [ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md).
 
+The eighth route is the first response this service does not have in hand before it answers.
+`GET /boards/:id/export` streams NDJSON — one header row per work item, one row per occurrence of its rule,
+then a `done` row — over a cursor that advances one row per pull (ADR 0010 decision 8), so the first line
+goes out while the last occurrence is still only a rule. The body of the `wi_deploy` item above, at
+`occurrences=3`, with each line's own byte count in front of it:
+
+```sh
+curl -s '127.0.0.1:3132/boards/bd_core/export?occurrences=3'
+# 198B {"kind":"item","id":"wi_deploy","title":"Deploy the release","status":"backlog","assigneeId":"mb_yusuf","estimateMinutes":30,"schedule":{"tz":"Europe/Berlin","dtStart":1774661400000,"freq":"DAILY"}}
+# 162B {"kind":"occurrence","itemId":"wi_deploy","index":0,"instant":1774661400000,"at":"2026-03-28T01:30:00.000Z","wall":"2026-03-28T02:30:00","disambiguation":"exact"}
+# 173B {"kind":"occurrence","itemId":"wi_deploy","index":1,"instant":1774746000000,"at":"2026-03-29T01:00:00.000Z","wall":"2026-03-29T02:30:00","disambiguation":"gap-roll-forward"}
+# 162B {"kind":"occurrence","itemId":"wi_deploy","index":2,"instant":1774830600000,"at":"2026-03-30T00:30:00.000Z","wall":"2026-03-30T02:30:00","disambiguation":"exact"}
+#  51B {"kind":"done","items":1,"occurrences":3,"bound":3}
+```
+
+`746` bytes of JSON plus a newline per row is a `751`-byte body, `150.2` bytes per row, measured over a real
+socket on the host (Node v26.8.2) and byte-for-byte the same in `cadence-test` (Node 24.21.0). A row is a
+string here and
+not an object someone has to encode, which is why `highWaterMark` can count rows and the byte question never
+reaches the route. The occurrence row carries both clocks — `instant`/`at` for the moment, `wall`/
+`disambiguation` for what the rule asked — because the third line is the reason the export exists: a reader
+with no engine in front of them cannot otherwise tell that 02:30 in Berlin happened at 01:00Z.
+
+`?occurrences=` is the only thing in this route that bounds the walk, and the door validates it before a
+cursor exists: absent means `20`, and `1001` is refused with `400 {"error":{"code":"INVALID_OCCURRENCES",
+"message":"occurrences must be at most 1000, got 1001"}}` and no row written. That is a measurement, not
+caution for its own sake. A client that read 2087 bytes and hung up left the engine `1188` steps in on the
+host and `3930` in the image *with a buffer of one row*: `highWaterMark` does not bound work, the socket
+queue does (~1200 rows here, ~3900 there), and a buffer only adds to that once it is bigger than it. Read to
+the end, 40 daily items at bound `200` is `8041` rows / `1353678` bytes (`219.34` and `275.5` ms on the host,
+`231.17` and `229.32` in the image) and at the ceiling bound `1000`, `40041` rows / `6755640` bytes
+(`1045.74` and `1753.4`, `1036.13` and `1056.8` ms).
+
+A body produced as it goes cannot announce its own truncation. The response is `transfer-encoding: chunked`
+with no `content-length` (measured absent on every response of this route), a client that leaves mid-body
+gets `ECONNRESET` on the `200` it was already given, and a walk that fails mid-body arrives the same way —
+on the wire those are one event. So completeness is in band or it is nowhere: a reader that never saw the
+`done` row has a partial export. The rest of what was measured here — that Fastify destroys the source stream
+at the socket close, which is why this route writes no disconnect handler, and that `app.close()` waits for
+an abandoned streamed response and can wait for ever on one client shape — is
+[ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md).
+
 Three entry points, nothing else: `cadence` (recurrence engine, zero dependencies, no I/O),
 `cadence/domain` (branded ids, board types, ports for the adapters), and `cadence/scheduler`
 (`sleep` and `runSeries` — the only layer that waits). `src/adapters`, `src/config` and `src/server`
@@ -156,8 +198,8 @@ CommonJS can `require()` all three on Node >= 22.12 — the reasoning is in
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md).
 
 Week 5's first slice adds no product code: it measures what a `Readable` does *around* an engine that is
-already lazy, because the next route — a board exported as NDJSON — is the first consumer that can stop,
-fail or go slow. One `read()` pulls exactly `highWaterMark` engine steps and hands back one of them, then
+already lazy, because the route its second slice then built — the NDJSON export above — is the first consumer
+that can stop, fail or go slow. One `read()` pulls exactly `highWaterMark` engine steps and hands back one of them, then
 refills one row per tick. `Readable.from(iterable)` defaults to `objectMode: true` with `highWaterMark: 1`
 — not `new Readable()`'s default and not `new Readable({objectMode: true})`'s — and that pair is identical
 on the host's v26.8.2 and in `node:22.23.3`, `node:24.21.0` and `node:26.11.1`, while the *byte* default is
@@ -172,7 +214,10 @@ numbers — 20 tests that count engine steps and event order rather than wall ti
 runtimes — including the five teardown paths (`destroy()`, `destroy(err)`, `break` in `for await`, a
 throwing consumer, and a stream nobody ever read, which has no `finally` to reach), the defaults in
 decision 2, both `write()`-return loops, and the fact that an `AbortSignal` changes nothing until the route
-wires it to `destroy()` itself. `stream.destroyOnAbort` is `undefined` on every runtime the probe checked —
+wires it to `destroy()` itself. The second slice put that last claim against a real socket and the socket
+won it: Fastify destroys the source stream at the close on its own, so `GET /boards/:id/export` writes no
+disconnect handler and says so in a comment (ADR 0011 decision 1).
+`stream.destroyOnAbort` is `undefined` on every runtime the probe checked —
 v26.8.2, `node:22.23.3`, `node:24.21.0`, `node:26.11.1` — which is a fact about those runtimes, recorded in
 the ADR rather than asserted by a test. Reasoning and the full number tables:
 [ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md).
@@ -186,21 +231,22 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md) (configuration),
 [ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md) (the HTTP layer),
 [ADR 0009](docs/adr/0009-the-containers-command-is-the-service-and-a-service-is-proved-by-the-request-it-answers.md) (the running service and its signals),
-[ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured).
+[ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured),
+[ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md) (the streamed route, and what a real socket does to it).
 
 ## Run it
 
 All of this is green on the host (Node v26.8.2), inside the image CI builds (Node 24.21.0) and in a
-clean `node:22-bookworm-slim` container with this tree copied in — the same 213 tests in 19 files, 13
+clean `node:22-bookworm-slim` container with this tree copied in — the same 243 tests in 21 files, 13
 package checks and coverage line on all three:
 
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (48 files, 0 errors, 0 warnings)
-npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 52 modules / 89 dependencies with dist present and 55 / 95 without it
-npm test              # 213 tests in 19 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine
-npm run test:coverage # 99.52% statements / 97.45% branches / 100% functions, gated in vitest.config.ts
+npm run lint          # eslint flat config, type-aware (51 files, 0 errors, 0 warnings)
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 56 modules / 98 dependencies with dist present and 59 / 104 without it
+npm test              # 243 tests in 21 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket
+npm run test:coverage # 99.58% statements / 97.94% branches / 100% functions, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 13 checks against the built package, not the source tree
 npm start             # node dist/server/main.js — needs the build above, and reads HOST/PORT/LOG_LEVEL
@@ -285,14 +331,17 @@ src/adapters/  log-notifier.ts (a ScheduleNotifier that renders one record per o
                and the way out), system-clock.ts (the Clock port as `Date.now()`), process-signals.ts
                (the `process` global as the one object that can attach and detach a stop listener) —
                internal: dist has them, the exports map does not
-src/server/    requests.ts (one body in, validated by the engine, not re-derived), http-error.ts (the
-               throw the handlers use and the one translation of it), create-app.ts (the routes, over
-               injected ports), shutdown.ts (waitForStopSignal: a promise that settles on the first
+src/server/    requests.ts (one body in, validated by the engine, not re-derived — and the occurrence bound
+               the export takes from the query), http-error.ts (the throw the handlers use and the one
+               translation of it), export-stream.ts (the board as NDJSON rows, one objectMode pull per row
+               over a series cursor, with `rows()` and `pulls()` counters on it), create-app.ts (the routes,
+               over injected ports), shutdown.ts (waitForStopSignal: a promise that settles on the first
                signal and lets go of every listener it attached), main.ts (the composition root: the
                only file that reads the configuration, binds, and waits to be asked to stop) — internal
                too, and the only layer that may reach every other
 test/          behaviour, DST transitions, validation, cancellation, configuration, public surface,
-               the stream semantics a route would inherit (pull-ahead, teardown, backpressure)
+               the stream semantics a route would inherit (pull-ahead, teardown, backpressure), the export
+               stream itself and the export route over a real socket
 scripts/       verify-package.mjs (the package surface), typecheck-consumer.ts,
                selfcheck.mjs (the prod image's last build step, run as its runtime user)
 Dockerfile     deps -> deps-prod -> build -> test -> prod
@@ -328,7 +377,8 @@ the seam, not the persistence story: everything they hold is gone when the proce
 own test seam rather than as scaffolding.
 
 Nothing on the HTTP surface is authenticated. Whoever can reach the port can create a board and move an
-item; what limits that today is the host half of the mapping — the image binds every interface and
+item, and since this slice can read a whole board's schedule out of it as NDJSON; what limits that today is
+the host half of the mapping — the image binds every interface and
 `compose.yaml` publishes `127.0.0.1:3000`, so a process on this machine can reach it and a machine on the
 network cannot. Week 5 owns the member identity the `mb_` ids are waiting for. The mutation surface is
 `PATCH` only — no delete, no reorder, no bulk move — and a concurrent write is a last-writer-wins race,
@@ -343,19 +393,21 @@ Delivery is at-most-once: `runSeries` advances the cursor before it notifies, so
 loses that occurrence and a retry replays from the next one. Making that at-least-once needs stored
 progress and a retry — week 12, not a wrapper around the notifier.
 
-The scheduler is not wired to the API yet: a work item can carry a rule, and the routes will refuse a bad
-one, but nothing walks the cursor the store holds. Week 5's second slice is `GET /boards/:id/export` —
-NDJSON, one row per occurrence — built against ADR 0010's decisions rather than around them: a
-demand-driven `_read` over a cursor, object mode with an explicit `highWaterMark`, a per-item bound taken
-from the request, `destroy()` wired to the request's close, and `write()`'s return honoured. That route
-will also be the first streamed body to cross a real socket, and the probe deliberately did not measure
-what Fastify's `reply` does when a client disappears mid-body; its answer belongs in that slice.
+The scheduler is not wired to the API yet: a work item can carry a rule, the export walks that rule for as
+long as the caller asks, and the routes refuse a bad one, but nothing advances the cursor a store holds on a
+timer. `GET /boards/:id/export` is a read of the whole rule, not a delivery — the half that waits for the next
+occurrence and notifies a sink is still `runSeries`'s, and still unwired.
 
-The service now answers when it is asked to stop, and that is as far as the proof goes. **In-flight
-requests are not shown to drain** — `app.close()` is what drains them and the idle-socket test is what
-bounds the wait, but this API has no slow route that could have been in flight when the signal arrived;
-demonstrating it needs a deliberately slow endpoint or a raw socket against the real server, which is a
-slice of its own. `/healthz` is a **liveness** answer, not a readiness one: it says this process serves
+What the export did change is the drain story. ADR 0009 left it open because no route was slow enough to still
+be running when a signal arrived; this one is, and measuring it gave the other half of the sentence.
+**`app.close()` waits for a streamed response**, and one client shape — a `fetch` body cancelled with nothing
+read, then a second request read to its end — held that wait for the full 8000 ms ceiling in both Linux
+runtimes while the host closed in 1 ms (ADR 0011 decision 10). `forceCloseConnections` is not something you
+hand to `close()` — measured `AVV_ERR_CALLBACK_NOT_FN` on all three runtimes — it is an instance option, so
+bounding the drain is a decision about how the app is constructed and belongs with a slow-route-in-flight test,
+not with this slice.
+
+`/healthz` is a **liveness** answer, not a readiness one: it says this process serves
 HTTP, not that a store loaded or a migration ran, and today there is nothing to load. And a stop request
 that arrives during boot is ignored, because the listener is registered after `listen()` resolves — the
 window is a few milliseconds wide and ends in the supervisor's `SIGKILL` if it is ever hit, so `init: true`

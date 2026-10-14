@@ -3,12 +3,14 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { Board } from '../domain/model.js';
 import type { BoardStore, Clock, WorkItemStore } from '../domain/ports.js';
 import type { LogLevel } from '../config/app-config.js';
+import { createExportStream } from './export-stream.js';
 import { asHttpError, HttpError } from './http-error.js';
 import {
   parseCreateBoard,
   parseCreateWorkItem,
   parseStatusChange,
   readBoardId,
+  readOccurrenceBound,
   readWorkItemId,
 } from './requests.js';
 
@@ -77,6 +79,32 @@ export function createApp(deps: AppDependencies): FastifyInstance {
     }
 
     return await deps.workItems.listForBoard(boardId);
+  });
+
+  /**
+   * The board as NDJSON, one line per row. It is the first response this service does not have in hand
+   * before it answers: the walk behind it is lazy (ADR 0002) and the stream asks for one row at a time
+   * (ADR 0010 decision 8), so the first line goes out while the last occurrence is still a rule.
+   *
+   * There is deliberately no `close`-to-`destroy` wiring here. ADR 0010 decision 7 told this route to
+   * write those three lines itself, and the probe that this slice ran on a real socket found Fastify
+   * already doing it: with a producer that yields, an unwired stream was destroyed at the socket close
+   * and its walk froze at 5 pulls out of 5000 — the same number the wired one reached. Adding the
+   * handler would be a second owner of a resource the framework has, and a test could not tell it from
+   * the framework's own work.
+   */
+  app.get<{ Params: { id: string }; Querystring: { occurrences?: string } }>('/boards/:id/export', async (request, reply) => {
+    const boardId = readBoardId(request.params.id);
+    const occurrences = readOccurrenceBound(request.query.occurrences);
+
+    if ((await deps.boards.loadBoard(boardId)) === null) {
+      throw new HttpError(404, 'BOARD_NOT_FOUND', `no board with id "${boardId}"`);
+    }
+
+    const exported = createExportStream(await deps.workItems.listForBoard(boardId), { occurrences });
+    reply.header('content-type', 'application/x-ndjson; charset=utf-8');
+
+    return reply.send(exported.stream);
   });
 
   app.patch<{ Params: { id: string } }>('/work-items/:id', async (request) => {

@@ -16,6 +16,19 @@ type IdKind = keyof typeof NAMESPACES;
 const NAMESPACES = { board: 'bd', member: 'mb', 'work-item': 'wi' } as const;
 
 const MAX_LABEL_LENGTH = 200;
+
+/** How many occurrences the export walks for an item whose caller named no number. */
+const DEFAULT_OCCURRENCES = 20;
+
+/**
+ * The ceiling a caller may ask for, and the only thing standing between an export and ADR 0010
+ * decision 3's number: a `DAILY` rule with no `count`, left to flow, walked 200000 candidate
+ * occurrences — about 547 years — in 4.4 seconds without once yielding to the timer phase. A bound on
+ * produced rows keeps that count out of reach of the row total; how many *candidates* the engine
+ * examines for one row stays the engine's own business.
+ */
+const MAX_OCCURRENCES = 1_000;
+
 // Widened on purpose: `WORK_ITEM_STATUSES` has the union as its element type, so `.includes()` would
 // refuse a plain string — and the value being tested here arrived as one.
 const KNOWN_STATUSES: readonly string[] = WORK_ITEM_STATUSES;
@@ -161,6 +174,33 @@ export function parseCreateWorkItem(boardId: BoardId, raw: unknown): CreateWorkI
 
 export function parseStatusChange(raw: unknown): WorkItemStatus {
   return readStatus(fields(raw)['status']);
+}
+
+/**
+ * The bound on how far an export may walk, read at the door rather than assumed further in.
+ *
+ * The parameter is `unknown` on purpose: a query value is not what its declared type says it is.
+ * `?occurrences=1&occurrences=2` arrives as an array, and a route that trusted its own generic would
+ * answer with the first value silently — which is exactly the kind of "the caller must have meant N"
+ * that decision 3 measured four seconds of.
+ */
+export function readOccurrenceBound(raw: unknown): number {
+  if (raw === undefined) return DEFAULT_OCCURRENCES;
+
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
+    throw new HttpError(
+      400,
+      'INVALID_OCCURRENCES',
+      `occurrences must be a whole number of rows between 0 and ${String(MAX_OCCURRENCES)}, got ${shown(raw)}`,
+    );
+  }
+
+  const bound = Number(raw);
+  if (bound > MAX_OCCURRENCES) {
+    throw new HttpError(400, 'INVALID_OCCURRENCES', `occurrences must be at most ${String(MAX_OCCURRENCES)}, got ${raw}`);
+  }
+
+  return bound;
 }
 
 /** A value the caller sent, spelled the way it reads in a message about it. */
