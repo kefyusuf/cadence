@@ -442,3 +442,32 @@ describe('the shape of every answer', () => {
     expect(response.body).not.toContain('the pool is closed');
   });
 });
+
+describe('closing', () => {
+  it('does not wait for a client that has gone quiet', async () => {
+    const listening = newApp();
+    const address = await listening.listen({ host: '127.0.0.1', port: 0 });
+
+    // One completed request leaves the connection in the client's keep-alive pool: open, and with
+    // nothing left to finish on it. The stop path depends on the server not waiting for that socket,
+    // because a load balancer or a browser holds it until its own idle timeout says otherwise.
+    const response = await fetch(`${address}/healthz`);
+    await response.text();
+
+    const outcome = await Promise.race([
+      listening.close().then(() => 'closed'),
+      new Promise((resolve) => {
+        setTimeout(() => resolve('waiting'), 500).unref();
+      }),
+    ]);
+
+    try {
+      expect(outcome).toBe('closed');
+    } finally {
+      // If it ever comes back `waiting` the shutdown is what needs fixing, not this timer — but the
+      // sockets are what the pending close is waiting on, so destroy them and let it finish.
+      listening.server.closeAllConnections();
+      await listening.close();
+    }
+  });
+});
