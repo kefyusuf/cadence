@@ -208,3 +208,9 @@ here with the numbers.
 - The scheduler is still not wired to the API: a work item carries a rule, the routes refuse a bad one, and
   nothing walks the cursor the store holds. `IdGenerator` still has no adapter. Both are unchanged by this
   slice.
+- CI ran the two new steps on the pushed commit — run `38525400452`, 47s, all three jobs success, no step
+  skipped. Its own numbers, on GitHub's runner rather than this laptop: the build's `#18 [prod 7/7]` printed
+  `selfcheck ok: … real wait waited 890 ms`, the health poll read `starting` at 1, 2, 3, 4 and 5 seconds and
+  `healthy` at 6 — the same status flipped 1s after start on the machine this slice was written on, so what
+  the step asserts is the transition and not a latency budget — and the stop step logged
+  `cadence stopping on SIGTERM` followed by `exit code after SIGTERM: 0`.
