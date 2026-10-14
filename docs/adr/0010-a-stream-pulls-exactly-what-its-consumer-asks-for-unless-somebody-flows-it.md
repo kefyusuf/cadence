@@ -235,6 +235,17 @@ is printed, because it did.
   entries, which is why the honest half of the number is the file count. The module counts depend on `dist`
   exactly as ADR 0006 decision 9a says, and the pair moved by one when the new test file gained its
   `node:events` import.
+- **Re-taken by CI after the push, on run `38541799986`** (`840d2e5`, 52 s, three jobs all on
+  `ubuntu-24.04`, 0 failed steps, 0 skipped steps, 0 annotations): `core (22)` (`v22.23.3`), `core (24)`
+  (`v24.21.0`) and `docker` each report `Test Files 19 passed`, `Tests 213 passed` and the coverage line
+  `99.52 / 97.45 / 100 / 99.52`, so the twenty stream tests keep their floors and ceilings on a hosted
+  runner — the file itself took `566ms` on Node 22. Each also reports
+  `no dependency violations found (55 modules, 95 dependencies)`, which is the *without-`dist`* pair because
+  `lint:deps` runs before `build` in the matrix job. And all three report
+  `tarball ships dist and hides src — 98 files, 44060 bytes`, including the `docker` job, which builds and
+  runs its gate inside `cadence-test` — the same image whose local run produced `44072`. That is the fifth
+  pair, and it lands on the host's number rather than the image's: the byte figure tracks the invocation,
+  not the environment. `98 files` is the claim; the bytes are a dated measurement.
 - **Nothing about the engine changed.** `occurrences()` and `createSeriesCursor` were already lazy; this
   slice measured what a `Readable` does *around* them, which is why the diff is one test file, one ADR and
   the README's numbers.
