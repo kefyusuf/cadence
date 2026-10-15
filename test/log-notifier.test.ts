@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createSeriesCursor } from '../src/core/cursor.js';
 import { CadenceError } from '../src/core/errors.js';
 import { nextOccurrence, type Occurrence, type Recurrence } from '../src/core/recurrence.js';
+import { createEstimate } from '../src/domain/estimate.js';
 import { parseId } from '../src/domain/ids.js';
 import type { WorkItem } from '../src/domain/model.js';
 import type { Clock, ScheduleNotifier } from '../src/domain/ports.js';
@@ -31,7 +32,7 @@ function item(overrides: Partial<WorkItem> = {}): WorkItem {
     title: 'Deploy the release',
     status: 'ready',
     assigneeId: memberId,
-    estimateMinutes: 30,
+    estimateMinutes: createEstimate(30),
     schedule: berlin,
     createdAt: 0,
     ...overrides,

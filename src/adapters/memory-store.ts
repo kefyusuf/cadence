@@ -30,11 +30,15 @@ export function createMemoryStores(): MemoryStores {
       },
     },
     workItems: {
-      load: (id: WorkItemId): Promise<WorkItem | null> => Promise.resolve(copyOrNull(items.get(id))),
+      load: (id: WorkItemId): Promise<WorkItem | null> => {
+        const stored = items.get(id);
+
+        return Promise.resolve(stored === undefined ? null : copyItem(stored));
+      },
       listForBoard: (boardId: BoardId): Promise<readonly WorkItem[]> =>
-        Promise.resolve([...items.values()].filter((candidate: WorkItem): boolean => candidate.boardId === boardId).map(copy)),
+        Promise.resolve([...items.values()].filter((candidate: WorkItem): boolean => candidate.boardId === boardId).map(copyItem)),
       save: (record: WorkItem): Promise<void> => {
-        items.set(record.id, copy(record));
+        items.set(record.id, copyItem(record));
         return Promise.resolve();
       },
     },
@@ -48,6 +52,16 @@ export function createMemoryStores(): MemoryStores {
  */
 function copy<T>(value: T): T {
   return structuredClone(value);
+}
+
+/**
+ * A work item copied for the store. The top object is new and the schedule — the only field a caller can
+ * still mutate underneath us — is deep-cloned, but the `Estimate` is shared by reference rather than
+ * copied: it is frozen at construction and has no way to change, so a second holder is not a second
+ * writer. Cloning it is not even possible — `structuredClone` throws on the value's methods.
+ */
+function copyItem(item: WorkItem): WorkItem {
+  return { ...item, schedule: structuredClone(item.schedule) };
 }
 
 function copyOrNull<T>(value: T | undefined): T | null {

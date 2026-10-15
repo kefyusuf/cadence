@@ -111,6 +111,16 @@ loadAppConfig({});
 means "bind a random port". Unset means the safe default — loopback, not every interface. See
 [ADR 0007](docs/adr/0007-the-environment-is-read-in-one-file-and-validated-by-a-pure-function.md).
 
+The domain now owns its first value. `estimateMinutes` is not a `number` the door checks — it is an
+`Estimate`, frozen the moment it exists, whole minutes at or above zero or nothing at all, with structural
+`equals` and a `toJSON` that keeps the wire a bare `30`. `parseEstimate` answers a `unknown` with a `Result`
+and the HTTP layer only translates it; `createEstimate` is the same parse with a throw on top. The interface
+carries a compile-time brand like `BoardId` does, so a literal shaped like an estimate is not one and a work
+item that carries `-3` is not a thing this codebase can say. Reasoning — including the discovery that
+`structuredClone` cannot copy a value with methods, and so the store shares the frozen one and deep-clones
+only the schedule — is in
+[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md).
+
 The API is the layer all of the above was built for: eight routes over the two stores and the engine.
 `createApp(deps)` takes the boards store, the work-item store, the clock and the logger switch, and
 returns an application that does not listen; `src/server/main.ts` is the one file that reads the
@@ -172,7 +182,10 @@ curl -s '127.0.0.1:3132/boards/bd_core/export?occurrences=3'
 socket on the host (Node v26.8.2) and byte-for-byte the same in `cadence-test` (Node 24.21.0). A row is a
 string here and
 not an object someone has to encode, which is why `highWaterMark` can count rows and the byte question never
-reaches the route. The occurrence row carries both clocks — `instant`/`at` for the moment, `wall`/
+reaches the route. Those five counts are no longer only a document's claim: `npm test` writes this exact body
+and asserts its line lengths and its total, so a change that moves a byte on the wire goes red instead of
+quietly making the README wrong — which is how the estimate becoming a value object was shown to be a
+non-event for the contract. The occurrence row carries both clocks — `instant`/`at` for the moment, `wall`/
 `disambiguation` for what the rule asked — because the third line is the reason the export exists: a reader
 with no engine in front of them cannot otherwise tell that 02:30 in Berlin happened at 01:00Z.
 
@@ -196,7 +209,7 @@ an abandoned streamed response and can wait for ever on one client shape — is
 [ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md).
 
 Three entry points, nothing else: `cadence` (recurrence engine, zero dependencies, no I/O),
-`cadence/domain` (branded ids, board types, ports for the adapters), and `cadence/scheduler`
+`cadence/domain` (branded ids, the estimate value, board types, ports for the adapters), and `cadence/scheduler`
 (`sleep` and `runSeries` — the only layer that waits). `src/adapters`, `src/config` and `src/server`
 are compiled into `dist` and ship in the tarball, but the `exports` map has no key for any of them, so
 they stay internal until publishing them is a decision. `cadence/src/...` is closed, and
@@ -238,21 +251,28 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md) (the HTTP layer),
 [ADR 0009](docs/adr/0009-the-containers-command-is-the-service-and-a-service-is-proved-by-the-request-it-answers.md) (the running service and its signals),
 [ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured),
-[ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md) (the streamed route, and what a real socket does to it).
+[ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md) (the streamed route, and what a real socket does to it),
+[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md) (the first value object, and what a store can and cannot copy).
 
 ## Run it
 
 All of this is green on the host (Node v26.8.2), inside the image CI builds (Node 24.21.0) and in a
-clean `node:22-bookworm-slim` container with this tree copied in — the same 243 tests in 21 files, 13
-package checks and coverage line on all three:
+clean `node:22-bookworm-slim` container with this tree copied in — the same `259 tests in 22 files`, the same
+13 package checks over 7 export targets, the same 53 files linted clean, and the same
+`61 modules / 114 dependencies` wherever `dist` does not exist yet. Coverage no longer splits by runtime
+either: `1003` of `1007` statements and `443` of `452` branches on all three. The package is the one figure
+that still tracks the call: 106 files on every runtime, and a gzipped byte total that moves when this
+document is edited, because this document is inside it — so the three measured totals are recorded in
+[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md),
+which the tarball does not ship (ADR 0011 decision 4 records why the bytes follow the call):
 
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (51 files, 0 errors, 0 warnings)
-npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 56 modules / 98 dependencies with dist present and 59 / 104 without it
-npm test              # 243 tests in 21 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket
-npm run test:coverage # 99.58% statements / 97.94% branches / 100% functions, gated in vitest.config.ts
+npm run lint          # eslint flat config, type-aware (53 files, 0 errors, 0 warnings)
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 58 modules / 108 dependencies with dist present and 61 / 114 without it
+npm test              # 259 tests in 22 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket, and the estimate as a value
+npm run test:coverage # 99.60% statements (1003/1007) / 98.00% branches (443/452) / 100% functions, identical on all three runtimes, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 13 checks against the built package, not the source tree
 npm start             # node dist/server/main.js — needs the build above, and reads HOST/PORT/LOG_LEVEL
@@ -327,7 +347,8 @@ mapping when something on your machine already owns 3000. A dev server will. The
 ```
 src/core/      clock.ts (wall <-> instant), recurrence.ts (rule -> occurrence),
                cursor.ts, errors.ts, result.ts, index.ts
-src/domain/    ids.ts (branded ids + parseId), model.ts, ports.ts (the shapes adapters implement)
+src/domain/    ids.ts (branded ids + parseId), estimate.ts (whole minutes, frozen, the first value),
+               model.ts, ports.ts (the shapes adapters implement)
 src/scheduler/ sleep.ts (a cancellable wait), run-series.ts (walk a cursor in due order), index.ts
 src/config/    app-config.ts (AppConfig and the rules that produce it — takes a record, never
                reads the platform)

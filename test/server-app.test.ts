@@ -197,7 +197,16 @@ describe('work items', () => {
   it('refuses an estimate that is not a whole number of minutes, and reads an absent one as null', async () => {
     await withBoard();
 
-    for (const estimateMinutes of ['30', 30.5, -1, true]) {
+    // The sentences are the domain's now, and this is the door's side of that: a value that is not a number
+    // is refused as the thing it is, not as a minute count it failed to be.
+    const refused = [
+      ['30', 'estimateMinutes must be a number of minutes, got "30"'],
+      [true, 'estimateMinutes must be a number of minutes, got true'],
+      [30.5, 'estimateMinutes must be a whole number of minutes, at least zero, got 30.5'],
+      [-1, 'estimateMinutes must be a whole number of minutes, at least zero, got -1'],
+    ] as const;
+
+    for (const [estimateMinutes, sentence] of refused) {
       const { status, json } = await call('POST', '/boards/bd_core/work-items', {
         id: 'wi_a',
         title: 'T',
@@ -206,6 +215,7 @@ describe('work items', () => {
 
       expect(status).toBe(400);
       expect(failure(json).code).toBe('INVALID_ESTIMATE');
+      expect(failure(json).message).toBe(sentence);
     }
 
     const absent = await call('POST', '/boards/bd_core/work-items', { id: 'wi_b', title: 'T' });

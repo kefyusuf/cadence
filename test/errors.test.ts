@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { CADENCE_ERROR_CODES, CadenceError, isCadenceError } from '../src/core/errors.js';
+import { CADENCE_ERROR_CODES, CadenceError, isCadenceError, shown } from '../src/core/errors.js';
 
 /** Stands in for the same module loaded twice (dual package copy, worker, realm). */
 class DuplicatedCadenceError extends Error {
@@ -65,5 +65,32 @@ describe('isCadenceError', () => {
     expect(cloned instanceof CadenceError).toBe(false);
     expect(isCadenceError(cloned)).toBe(false);
     expect((cloned as Partial<CadenceError>).code).toBeUndefined();
+  });
+});
+
+/**
+ * The one branch that used to exist twice — `null`, which the HTTP layer spelled `null` and a domain
+ * copy spelled `object` — is in here on purpose. Two layers now write refusals about the same values, so
+ * the spelling is a rule with one owner and one test, not a detail of whichever module raised last.
+ */
+describe('shown', () => {
+  const CASES: readonly (readonly [unknown, string])[] = [
+    [30, '30'],
+    [0, '0'],
+    [NaN, 'NaN'],
+    [true, 'true'],
+    ['thirty', '"thirty"'],
+    ['', '""'],
+    [null, 'null'],
+    [{}, 'object'],
+    [[30], 'object'],
+    [undefined, 'undefined'],
+    [() => 0, 'function'],
+  ];
+
+  it('names a number, a boolean and a string as itself, and everything else by its type', () => {
+    for (const [raw, expected] of CASES) {
+      expect(shown(raw), typeof raw).toBe(expected);
+    }
   });
 });

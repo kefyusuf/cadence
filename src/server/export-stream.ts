@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { createSeriesCursor, type SeriesCursor } from '../core/cursor.js';
 import type { Occurrence } from '../core/recurrence.js';
 import type { Disambiguation } from '../core/clock.js';
+import type { Estimate } from '../domain/estimate.js';
 import type { WorkItem, WorkItemStatus } from '../domain/model.js';
 
 /**
@@ -17,7 +18,8 @@ export interface ItemRow {
   readonly title: string;
   readonly status: WorkItemStatus;
   readonly assigneeId: string | null;
-  readonly estimateMinutes: number | null;
+  /** The value itself: `toJSON` is what puts a bare number on the wire, the way `schedule` stays a rule. */
+  readonly estimateMinutes: Estimate | null;
   /** The rule as it is stored: the export describes the board, it does not re-derive it. */
   readonly schedule: WorkItem['schedule'];
 }

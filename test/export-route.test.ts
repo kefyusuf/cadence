@@ -92,6 +92,37 @@ describe('GET /boards/:id/export', () => {
     }
   });
 
+  it('writes the body the README prints, byte for byte', async () => {
+    // The README quotes this one response and counts its lines (`198B`, `751` bytes in total), so the
+    // numbers there are only honest while the route keeps writing exactly these bytes. Every step the
+    // estimate takes — the `30` that arrives as `unknown`, the `Estimate` the store hands back, the row
+    // the stream encodes — has to land on the wire as the number it was.
+    await create('bd_core', [
+      {
+        id: 'wi_deploy',
+        title: 'Deploy the release',
+        status: 'backlog',
+        assigneeId: 'mb_yusuf',
+        estimateMinutes: 30,
+        schedule: daily,
+      },
+    ]);
+    const { body } = await get('/boards/bd_core/export?occurrences=3');
+    const lines = body.split('\n').filter((line: string): boolean => line.length > 0);
+
+    expect(lines.map((line: string): number => Buffer.byteLength(line, 'utf8'))).toEqual([198, 162, 173, 162, 51]);
+    expect(Buffer.byteLength(body, 'utf8')).toBe(751);
+    expect(body).toBe(
+      [
+        '{"kind":"item","id":"wi_deploy","title":"Deploy the release","status":"backlog","assigneeId":"mb_yusuf","estimateMinutes":30,"schedule":{"tz":"Europe/Berlin","dtStart":1774661400000,"freq":"DAILY"}}',
+        '{"kind":"occurrence","itemId":"wi_deploy","index":0,"instant":1774661400000,"at":"2026-03-28T01:30:00.000Z","wall":"2026-03-28T02:30:00","disambiguation":"exact"}',
+        '{"kind":"occurrence","itemId":"wi_deploy","index":1,"instant":1774746000000,"at":"2026-03-29T01:00:00.000Z","wall":"2026-03-29T02:30:00","disambiguation":"gap-roll-forward"}',
+        '{"kind":"occurrence","itemId":"wi_deploy","index":2,"instant":1774830600000,"at":"2026-03-30T00:30:00.000Z","wall":"2026-03-30T02:30:00","disambiguation":"exact"}',
+        '{"kind":"done","items":1,"occurrences":3,"bound":3}',
+      ].join('\n') + '\n',
+    );
+  });
+
   it('refuses a board nobody stored with a status, not with a truncated body', async () => {
     await create('bd_core', [{ status: 'ready' }]);
     const { status, json } = await get('/boards/bd_growth/export');

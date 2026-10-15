@@ -1,4 +1,5 @@
 import type { Recurrence } from '../core/recurrence.js';
+import type { Estimate } from './estimate.js';
 import type { BoardId, MemberId, WorkItemId } from './ids.js';
 
 /**
@@ -28,7 +29,7 @@ export interface WorkItem {
   readonly title: string;
   readonly status: WorkItemStatus;
   readonly assigneeId: MemberId | null;
-  readonly estimateMinutes: number | null;
+  readonly estimateMinutes: Estimate | null;
   readonly schedule: Recurrence | null;
   readonly createdAt: number;
 }

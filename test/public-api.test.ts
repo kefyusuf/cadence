@@ -30,7 +30,16 @@ describe('public surface', () => {
   });
 
   it('exposes exactly the domain runtime exports', () => {
-    expect(Object.keys(cadenceDomain)).toEqual(['parseId']);
+    expect(Object.keys(cadenceDomain).sort()).toEqual(['createEstimate', 'parseEstimate', 'parseId']);
+  });
+
+  it('lets a consumer build the value the model is made of', () => {
+    // A `WorkItem` carries an `Estimate`, so a package that could not reach a constructor could not make a
+    // work item at all: the type would be public while the value behind it was not.
+    const parsed = cadenceDomain.parseEstimate(30);
+    if (parsed.ok !== true) throw new Error(`a whole minute count off the wire was refused: ${parsed.error.message}`);
+
+    expect(parsed.value.equals(cadenceDomain.createEstimate(30))).toBe(true);
   });
 
   it('exposes exactly the scheduler runtime exports', () => {

@@ -12,12 +12,30 @@ export const CADENCE_ERROR_CODES = [
   'INVALID_CONFIG',
   'INVALID_DELAY',
   'INVALID_LIMIT',
+  'INVALID_ESTIMATE',
   'ABORTED',
   'SEARCH_EXHAUSTED',
   'UNEXPECTED',
 ] as const;
 
 export type CadenceErrorCode = (typeof CADENCE_ERROR_CODES)[number];
+
+/**
+ * A value somebody handed us, spelled the way it reads in a refusal about it: numbers and booleans
+ * bare, strings quoted, `null` named as itself rather than as the `object` `typeof` reports for it, and
+ * anything else by its type.
+ *
+ * A message that names the offending value is the only part of a refusal a caller can act on, and the
+ * spelling is a rule about wording rather than about a particular field — so it lives beside the codes
+ * rather than in whichever layer is currently raising one. Two copies would be free to drift, and the
+ * drift would be invisible until someone compared two 400 bodies.
+ */
+export function shown(raw: unknown): string {
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  if (typeof raw === 'string') return `"${raw}"`;
+
+  return raw === null ? 'null' : typeof raw;
+}
 
 const KNOWN_CODES: ReadonlySet<string> = new Set<string>(CADENCE_ERROR_CODES);
 

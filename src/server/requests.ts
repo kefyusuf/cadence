@@ -1,6 +1,8 @@
+import { shown } from '../core/errors.js';
 import { isOk } from '../core/result.js';
 import { createSeriesCursor } from '../core/cursor.js';
 import type { Recurrence } from '../core/recurrence.js';
+import { parseEstimate, type Estimate } from '../domain/estimate.js';
 import { parseId, type BoardId, type BrandedId, type MemberId, type WorkItemId } from '../domain/ids.js';
 import { WORK_ITEM_STATUSES, type WorkItemStatus } from '../domain/model.js';
 import { HttpError, asHttpError, fromCadenceError } from './http-error.js';
@@ -45,7 +47,7 @@ export interface CreateWorkItem {
   readonly title: string;
   readonly status: WorkItemStatus;
   readonly assigneeId: MemberId | null;
-  readonly estimateMinutes: number | null;
+  readonly estimateMinutes: Estimate | null;
   readonly schedule: Recurrence | null;
 }
 
@@ -107,13 +109,13 @@ function readMemberIds(raw: unknown): readonly MemberId[] {
   return raw.map((value: unknown): MemberId => readId('member', value));
 }
 
-function readEstimate(raw: unknown): number | null {
+function readEstimate(raw: unknown): Estimate | null {
   if (raw === undefined || raw === null) return null;
-  if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) {
-    throw new HttpError(400, 'INVALID_ESTIMATE', `estimateMinutes must be a whole number of minutes, at least zero, got ${shown(raw)}`);
-  }
 
-  return raw;
+  const parsed = parseEstimate(raw);
+  if (!isOk(parsed)) throw fromCadenceError(parsed.error);
+
+  return parsed.value;
 }
 
 function readAssignee(raw: unknown): MemberId | null {
@@ -201,12 +203,4 @@ export function readOccurrenceBound(raw: unknown): number {
   }
 
   return bound;
-}
-
-/** A value the caller sent, spelled the way it reads in a message about it. */
-function shown(raw: unknown): string {
-  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
-  if (typeof raw === 'string') return `"${raw}"`;
-
-  return raw === null ? 'null' : typeof raw;
 }

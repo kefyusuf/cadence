@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Recurrence } from '../src/core/recurrence.js';
+import { createEstimate } from '../src/domain/estimate.js';
 import { parseId } from '../src/domain/ids.js';
 import type { Board, WorkItem } from '../src/domain/model.js';
 import { createMemoryStores } from '../src/adapters/memory-store.js';
@@ -33,7 +34,7 @@ function item(overrides: Partial<WorkItem> = {}): WorkItem {
     title: 'Deploy the release',
     status: 'ready',
     assigneeId: memberId,
-    estimateMinutes: 30,
+    estimateMinutes: createEstimate(30),
     schedule: weekly,
     createdAt: 0,
     ...overrides,
@@ -165,7 +166,8 @@ describe('the work item store', () => {
 
   it('holds a copy of the schedule, not the array the caller kept', async () => {
     const { workItems } = fresh();
-    await workItems.save(item());
+    const saved = item();
+    await workItems.save(saved);
 
     const loaded = await workItems.load(itemId);
     const schedule = loaded?.schedule;
@@ -174,7 +176,19 @@ describe('the work item store', () => {
     }
     mutable(schedule.byWeekDay).push('SU');
 
-    await expect(workItems.load(itemId)).resolves.toEqual(item());
+    await expect(workItems.load(itemId)).resolves.toEqual(saved);
+  });
+
+  it('hands back the estimate it was given, because a value has nothing to copy', async () => {
+    const { workItems } = fresh();
+    const saved = item();
+
+    await workItems.save(saved);
+
+    const loaded = await workItems.load(itemId);
+    if (loaded === null) throw new Error('the item was not stored');
+
+    expect(loaded.estimateMinutes).toBe(saved.estimateMinutes);
   });
 
   it('hands out a distinct object on every load', async () => {
