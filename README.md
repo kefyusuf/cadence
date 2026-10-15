@@ -263,7 +263,8 @@ clean `node:22-bookworm-slim` container with this tree copied in — the same `2
 `61 modules / 114 dependencies` wherever `dist` does not exist yet. Coverage no longer splits by runtime
 either: `1003` of `1007` statements and `443` of `452` branches on all three. The package is the one figure
 that still tracks the call: 107 files on every runtime, and a gzipped byte total that moves when this
-document is edited, because this document is inside it — so the three measured totals are recorded in
+document is edited, because this document is inside it — and moves again with the filesystem that packed it,
+which is why the per-environment totals are recorded in
 [ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md),
 which the tarball does not ship (ADR 0011 decision 4 records why the bytes follow the call):
 

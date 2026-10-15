@@ -224,11 +224,30 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   `test/estimate.test.ts` and one each in `test/memory-store.test.ts`, `test/public-api.test.ts`,
   `test/export-route.test.ts` and `test/errors.test.ts`; coverage `99.60%` statements (`1003` of `1007`) /
   `98.00%` branches (`443` of `452`) / `100%` functions; `verify:package` 13 checks over 7 export targets,
-  tarball 107 files / `54709` bytes on the host. All of it ran again in `cadence-test` (Node 24.21.0) and in a
+  tarball 107 files / `54725` bytes on the host. All of it ran again in `cadence-test` (Node 24.21.0) and in a
   clean `node:22-bookworm-slim` (22.23.3) built from this tree: same tests, same lint and dependency counts,
-  byte-identical coverage, and the same tarball on both Linux runtimes at `54724` bytes — 15 more than the
-  host's, which is a packaging difference over the same 107 files, not a difference in what ships. The
-  decision 3 probe printed its recorded line on all three, not only on the host.
+  byte-identical coverage, and the same `54741`-byte tarball on both Linux runtimes. CI ran the tree one edit
+  earlier (`de358e9`, run `38736195200`, three jobs, all green in 51s): `99.6 / 98 / 100 / 99.6` for statements,
+  branches, functions and lines in both `core (22)` and `core (24)`, `22 files / 259 tests` in the image job, the
+  prod container reporting `healthy` on its own `GET /healthz` after 7 seconds read-only, unprivileged and with
+  `--cap-drop=ALL`, and `exit code after SIGTERM: 0`. Every environment that packed the tree — the host, both
+  images built here, and all three CI jobs — packed **107 files**, and the byte totals split.
+
+  The split is worth recording precisely, because the explanation this slice first wrote down was wrong. It
+  said the Linux runtimes sat 15 bytes above the host, which reads as if the runtime moved the number. It does
+  not: CI is Linux, and both of its `core` jobs packed byte-for-byte what the Windows host packed at the same
+  commit (`54709` each). The gap belongs to the machine, not the OS. `npm pack --dry-run --json` on the host and
+  on `cadence-test` gives the whole account: the same `107` paths, the same `185590` content bytes on both sides,
+  and three entries whose mode differs — `README.md`, `LICENSE` and `package.json` are `0755` out of a Docker
+  Desktop context copied from a Windows tree and `0644` on the host, while the `104` entries under `dist`, built
+  inside the image, agree on both sides. Those three headers cost 15 bytes against the README CI packed and 16
+  against this one. Nothing in
+  what ships differs, which is the fourth independent reason the gzip figure cannot be a repository-wide number;
+  `107 files` and `185590` content bytes are the claims that survive a change of machine.
+
+  The decision 3 probe was re-run after the rebase, on the host and on both images, and printed the same line
+  on all three (`clone ok: {"minutes":30} | instance? false | has equals? undefined`); it was not run inside
+  CI, so no claim here depends on CI having seen it.
 
   Only two of those three runtimes have a build recipe the repository itself carries: the host and
   `--target test`, which is Node 24. The Node 22 figure came from a container this slice assembled on the
@@ -276,6 +295,8 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   `53498` into it — two bytes, from nothing but the digits — and a doc comment added three directories away
   later moved the whole figure by `216`. Those three observations are the pre-`LICENSE` tree's and no longer
   reproduce; they are kept as the history of how the measurement behaves, not as a number to check. There is
-  no fixed point to write down. This file is not packed, so the figures above are the ones a re-run prints,
-  which is the same reason ADR 0011 decision 4 pins byte counts to a call rather than to a document; the
-  README keeps only the part that does not move, `107 files`.
+  no fixed point to write down. This file is not packed, so the figures above are the ones a re-run prints on
+  the filesystem that packed them — which the mode finding above has now made a necessary qualifier, since the
+  same tree prints `54725` or `54741` depending on who copied the files, not on what is in them. ADR 0011
+  decision 4 pins byte counts to a call rather than to a document for the first half of this; the README keeps
+  only the part that does not move, `107 files`.
