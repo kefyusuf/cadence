@@ -245,6 +245,14 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   what ships differs, which is the fourth independent reason the gzip figure cannot be a repository-wide number;
   `107 files` and `185590` content bytes are the claims that survive a change of machine.
 
+  The push that carried this correction is itself a fourth vote on it. CI ran the rebased tree (`52e2509`, run
+  `38740554009`, three jobs, all green) and each of them printed `107 files, 54725 bytes` — the host's figure,
+  after the single README edit that moved the host from `54709` to `54725` and this machine's two images from
+  `54724` to `54741`. What that run corroborates is the pairing, not the header account: CI's own file modes were
+  never sampled, so the mode evidence stays the `npm pack --dry-run --json` comparison above, and what the run
+  adds is that a runner this slice did not build, reading a filesystem this slice did not copy, reproduced the
+  host's bytes at both commits rather than only the one where the coincidence was first noticed.
+
   The decision 3 probe was re-run after the rebase, on the host and on both images, and printed the same line
   on all three (`clone ok: {"minutes":30} | instance? false | has equals? undefined`); it was not run inside
   CI, so no claim here depends on CI having seen it.
