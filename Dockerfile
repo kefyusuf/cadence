@@ -23,12 +23,15 @@ COPY src ./src
 RUN npm run build
 
 
+# The copy list is the package surface `verify:package` measures, so it has to carry the LICENSE: npm
+# packs a root LICENSE whether `files` names it or not, and an image that omits it would verify a
+# 106-file tarball while the host and CI's checkout pack 107.
 FROM node:24-bookworm-slim AS test
 ENV NODE_ENV=development
 WORKDIR /app
 RUN chown node:node /app
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node package.json tsconfig.json tsconfig.build.json vitest.config.ts eslint.config.js .dependency-cruiser.cjs README.md ./
+COPY --chown=node:node package.json tsconfig.json tsconfig.build.json vitest.config.ts eslint.config.js .dependency-cruiser.cjs README.md LICENSE ./
 COPY --chown=node:node src ./src
 COPY --chown=node:node test ./test
 COPY --chown=node:node scripts ./scripts

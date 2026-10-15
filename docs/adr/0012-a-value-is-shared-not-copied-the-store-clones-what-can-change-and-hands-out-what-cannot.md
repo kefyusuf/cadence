@@ -216,18 +216,33 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   leaves `readEstimate` as `null` before a message is ever built, so the `null` branch the two copies of `shown`
   disagreed about was never observable from the door — which is the clearest argument in this slice for testing
   the shared helper directly, in `test/errors.test.ts`, instead of hoping a route walks into it.
-- **Measured on the final tree** (the whole gate chain re-run after every file above was in place): typecheck
-  clean; eslint clean over 53 files, 0 errors and 0 warnings; dependency-cruiser 0 violations —
+- **Measured on the final tree** (the whole gate chain re-run after every file above was in place, and then
+  again after this slice was rebased onto the `LICENSE` that landed on `main` while it was being written):
+  typecheck clean; eslint clean over 53 files, 0 errors and 0 warnings; dependency-cruiser 0 violations —
   `58 modules, 108 dependencies` with `dist` present and `61 / 114` without it, the latter being what a fresh
   container reports; `259 tests in 22 files`, which is the 243 this slice started from plus 12 in
   `test/estimate.test.ts` and one each in `test/memory-store.test.ts`, `test/public-api.test.ts`,
   `test/export-route.test.ts` and `test/errors.test.ts`; coverage `99.60%` statements (`1003` of `1007`) /
   `98.00%` branches (`443` of `452`) / `100%` functions; `verify:package` 13 checks over 7 export targets,
-  tarball 106 files / `53760` bytes on the host. All of it ran again in `cadence-test` (Node 24.21.0) and in a
+  tarball 107 files / `54709` bytes on the host. All of it ran again in `cadence-test` (Node 24.21.0) and in a
   clean `node:22-bookworm-slim` (22.23.3) built from this tree: same tests, same lint and dependency counts,
-  byte-identical coverage, and the same tarball on both Linux runtimes at `53774` bytes — 14 more than the
-  host's, which is a packaging difference over the same 106 files, not a difference in what ships. The
+  byte-identical coverage, and the same tarball on both Linux runtimes at `54724` bytes — 15 more than the
+  host's, which is a packaging difference over the same 107 files, not a difference in what ships. The
   decision 3 probe printed its recorded line on all three, not only on the host.
+
+  The `LICENSE` deserves its own paragraph because it moved a measured number while being listed nowhere:
+  `files` still names only `dist` and `README.md`, but npm packs a root `LICENSE` whatever the manifest says,
+  so the tarball went from 106 files to 107 the day that file appeared. The re-measure then caught something
+  second-order and worse than a changed count. The `test` stage copy-lists exactly the files its
+  `verify:package` needs, and `LICENSE` had not been added to that list, so the image verified a **106-file**
+  tarball while the host and CI's own checkout packed **107** — one script, two package surfaces, and no gate
+  able to see the difference, because every number it printed was honest about the directory it was run in.
+  Putting `LICENSE` on that one `COPY` is what made the three runtimes agree, and the two Linux runs then
+  reported byte-identical tarballs. The `prod` stage is deliberately untouched: it ships `dist`, not the npm
+  tarball, so whether a running container should carry the license text is a different question with a
+  different answer, and this slice did not earn it. The shape of the failure is ADR 0011 decision 4's, in the
+  other direction — a verification assembled by hand from a file list can stay green while measuring a surface
+  that no longer exists.
 
   Those two totals are recorded here rather than in the README for a reason that only showed up while measuring
   them: `verify:package` reports the *gzipped* tarball, and the README is inside that tarball, so a sentence
@@ -235,4 +250,4 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   `53498` into it — two bytes, from nothing but the digits — and a doc comment added three directories away
   later moved the whole figure by `216`. There is no fixed point to write down. This file is not packed, so the
   figures above are the ones a re-run prints, which is the same reason ADR 0011 decision 4 pins byte counts to
-  a call rather than to a document; the README keeps only the part that does not move, `106 files`.
+  a call rather than to a document; the README keeps only the part that does not move, `107 files`.

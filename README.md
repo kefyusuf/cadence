@@ -1,23 +1,24 @@
 # cadence
 
 ![CI](https://github.com/kefyusuf/cadence/actions/workflows/ci.yml/badge.svg)
-![coverage](https://img.shields.io/badge/coverage-99.5%25%20stmts-green)
+![coverage](https://img.shields.io/badge/coverage-99.6%25%20stmts-green)
 
 A recurring-schedule engine and team board. The part that is hard is the part that is
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** built 13–14 October 2026 — core engine, domain vocabulary, package surface,
+**Status:** built 13–15 October 2026 — core engine, domain vocabulary, package surface,
 the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
 computing it, the adapters that implement the domain ports, the configuration layer that reads the
 environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
-an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, in the same two days,
+an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, across those three days,
 streams over the lazy engine: first the measurements of what a `Readable` actually pulls, then the route
-those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it. The board
-UI, cache, queue and observability layers come next; see `docs/adr/`.
+those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it, and the
+estimate grown into the project's first value object. The board UI, cache, queue and observability layers
+come next; see `docs/adr/`.
 
-**Gate (measured, not claimed):** 21 test files · 243 tests · 99.58% statement and 97.94% branch
-coverage · 11 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
+**Gate (measured, not claimed):** 22 test files · 259 tests · 99.60% statement and 98.00% branch
+coverage · 12 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
 verification on Node 22 and 24, and a second job builds the test and prod images, keeps the prod
 container running read-only, unprivileged and with all capabilities dropped until its own
 `GET /healthz` probe reports `healthy`, then proves that a `SIGTERM` stops it with exit code 0.
@@ -261,7 +262,7 @@ clean `node:22-bookworm-slim` container with this tree copied in — the same `2
 13 package checks over 7 export targets, the same 53 files linted clean, and the same
 `61 modules / 114 dependencies` wherever `dist` does not exist yet. Coverage no longer splits by runtime
 either: `1003` of `1007` statements and `443` of `452` branches on all three. The package is the one figure
-that still tracks the call: 106 files on every runtime, and a gzipped byte total that moves when this
+that still tracks the call: 107 files on every runtime, and a gzipped byte total that moves when this
 document is edited, because this document is inside it — so the three measured totals are recorded in
 [ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md),
 which the tarball does not ship (ADR 0011 decision 4 records why the bytes follow the call):
