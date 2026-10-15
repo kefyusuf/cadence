@@ -215,8 +215,8 @@ decision 6 records again against the real implementation.
   `56` files (from `53`); dependency-cruiser `0` violations at `64 modules / 134 dependencies` with no `dist`
   and `61 / 128` with one (the `61` is what ADR 0012 recorded, because `scripts/typecheck-consumer.ts` resolves
   `cadence` into `dist` once it exists); `verify:package` still 13 checks over 7 export targets, tarball now
-  `115` files on every runtime — `60090` bytes gzipped on the host, `60104` on both Linux runtimes, `205854`
-  content bytes on all three.
+  `115` files on every runtime — `60090` bytes gzipped on the host and on CI's own Linux runner, `60104` on
+  the two Linux images built on this machine, `205854` content bytes on all of them.
 - **A route can now answer `500 INTERNAL` for a rule nobody wrote, and that is the old answer, not a new
   one.** Decision 9 is the one place this slice changed the HTTP layer's behaviour rather than its plumbing:
   `fromCadenceError` withholds the message of an `UNEXPECTED` failure, which is what `asHttpError` already did
@@ -235,6 +235,19 @@ decision 6 records again against the real implementation.
   constant into it. Both Linux runtimes are the ones ADR 0012 named — `--target test` for 24.21.0 and the
   scratch `n22.Dockerfile` its Consequences section prints in full for 22.23.3; neither file is in this repo,
   which is why the recipe is on the record instead.
+- **CI packed the host's bytes, which is the mode account confirmed rather than a fourth number to explain.**
+  Run `38809979135` on `fb20e78` came up green across three jobs — `core (22)`, `core (24)`, `docker` —
+  every one on `ubuntu-24.04`, with no failed or skipped step and no annotation on any of the three check-runs,
+  and all three printed `115 files, 60090 bytes`. A hosted Linux runner agreeing with a Windows host to the byte
+  is what a `0644` checkout looks like: the runner's own checkout writes `README.md`, `LICENSE` and
+  `package.json` readable-and-not-executable, so nothing in that tarball carries the three mode bits that cost
+  the local images their `14` bytes. The `docker` job proves it from the other side, because it packs inside
+  `cadence-test` — the same stage this slice measured locally, built this time from a Linux checkout rather than
+  a Windows tree — and it landed on `60090` too. The rest of the run reproduced what the host and both images
+  had already said: `23` files and `288` tests, coverage `99.63 / 98.38 / 100 / 99.63`,
+  `64 modules / 134 dependencies` (the without-`dist` pair, since the matrix jobs lint before they build), `7`
+  export targets, `real wait waited 407 ms` in the prod selfcheck, the container `healthy` after `7 s` read-only,
+  unprivileged and with every capability dropped, and `exit code after SIGTERM: 0`.
 - **Two refusal sentences changed layers with their rules, and their bytes are pinned at the HTTP layer.**
   The contract a client reads is unchanged for every route: each refusal the door used to write for itself it
   now asks the domain for, word for word, and the one shape where the plumbing could have answered
