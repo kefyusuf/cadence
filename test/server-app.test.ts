@@ -185,7 +185,9 @@ describe('work items', () => {
 
     expect(bad.status).toBe(400);
     expect(failure(bad.json).code).toBe('INVALID_STATUS');
-    expect(failure(bad.json).message).toContain('backlog');
+    // Pinned character for character: the rule moved from this layer into `parseStatus`, and a caller that
+    // matches on the words it has been reading since week 4 must not be the cost of moving it.
+    expect(failure(bad.json).message).toBe('status must be one of backlog, ready, in_progress, blocked, done, got "shipping"');
 
     for (const status of ['backlog', 'ready', 'in_progress', 'blocked', 'done']) {
       const created = await call('POST', '/boards/bd_core/work-items', { id: `wi_${status}`, title: 'T', status });
@@ -301,12 +303,38 @@ describe('work items', () => {
   it('refuses a schedule that is neither null nor an object', async () => {
     await withBoard();
 
-    for (const schedule of ['daily', 42, []]) {
+    const CASES: readonly (readonly [unknown, string])[] = [
+      ['daily', 'schedule must be an object or null, got "daily"'],
+      [42, 'schedule must be an object or null, got 42'],
+      [[], 'schedule must be an object or null, got object'],
+    ];
+
+    for (const [schedule, message] of CASES) {
       const { status, json } = await call('POST', '/boards/bd_core/work-items', { id: 'wi_a', title: 'T', schedule });
 
       expect(status).toBe(400);
       expect(failure(json).code).toBe('INVALID_SCHEDULE');
+      // The words moved into the domain with the rule; the body a client reads may not move with them.
+      expect(failure(json).message).toBe(message);
     }
+  });
+
+  it('answers a throw the engine did not write with a 500 that says nothing about it', async () => {
+    await withBoard();
+
+    // The engine never checks that `byWeekDay` is an array, so this rule reaches a bare TypeError inside the
+    // cursor. The door hands the failure up as `UNEXPECTED` and `fromCadenceError` answers it the way
+    // `asHttpError` answers any failure this codebase did not write: the status, and not a word of the engine's
+    // own message. `test/http-error.test.ts` pins the rule; this pins that the route is under it.
+    const { status, json } = await call('POST', '/boards/bd_core/work-items', {
+      id: 'wi_a',
+      title: 'T',
+      schedule: { tz: 'Europe/Berlin', dtStart: Date.UTC(2026, 2, 28, 1, 30), freq: 'WEEKLY', byWeekDay: 'MO' },
+    });
+
+    expect(status).toBe(500);
+    expect(failure(json).code).toBe('INTERNAL');
+    expect(failure(json).message).toBe('the request could not be handled');
   });
 
   it('refuses a second item under an id it already holds, across boards', async () => {

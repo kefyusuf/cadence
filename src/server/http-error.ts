@@ -22,9 +22,15 @@ export class HttpError extends Error {
  * The engine refuses a rule it cannot follow by code, and every code it uses for a bad rule is a
  * client error. The two codes it uses when it gave up searching are not — there the caller handed over
  * a rule that was legal and the engine ran out of patience, which is this process's problem.
+ *
+ * `UNEXPECTED` is the code a door gives a throw *it did not write* (`fromThrowable`'s label for anything
+ * that is not a `CadenceError`), so it is answered the way `asHttpError` answers an unknown throw: without
+ * its message. A door that reports the engine's own words is a door that puts `rec.byWeekDay.map is not a
+ * function` in a response body, and ADR 0013 measured a schedule shape that reaches it.
  */
 export function fromCadenceError(error: CadenceError): HttpError {
-  const gaveUp = error.code === 'SEARCH_EXHAUSTED' || error.code === 'UNEXPECTED';
+  if (error.code === 'UNEXPECTED') return new HttpError(500, 'INTERNAL', 'the request could not be handled');
+  const gaveUp = error.code === 'SEARCH_EXHAUSTED';
   return new HttpError(gaveUp ? 500 : 400, error.code, error.message);
 }
 

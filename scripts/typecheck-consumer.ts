@@ -5,6 +5,7 @@ import {
   ok,
   type Disambiguation,
   type Occurrence,
+  type Recurrence,
   type Result,
   type SeriesCursor,
 } from 'cadence';
@@ -12,11 +13,17 @@ import {
   createEstimate,
   parseEstimate,
   parseId,
+  parseSchedule,
+  parseStatus,
+  parseWorkItemRow,
+  toWorkItemRow,
   type BoardId,
   type BoardStore,
   type Clock,
   type Estimate,
   type WorkItem,
+  type WorkItemRow,
+  type WorkItemStatus,
 } from 'cadence/domain';
 import { runSeries, sleep, type RunSummary, type SleepFn } from 'cadence/scheduler';
 
@@ -52,6 +59,21 @@ export const fromTheWire: Result<Estimate, CadenceError> = parseEstimate('30');
 export function minutesOf(item: WorkItem): number | null {
   return item.estimateMinutes === null ? null : item.estimateMinutes.minutes;
 }
+
+/**
+ * The row is the shape a store with columns holds, and the codec is the only way back up to a `WorkItem`:
+ * proved against `dist/*.d.ts` because an adapter written outside this repository cannot be handed a brand
+ * it did not parse. `JSON.parse` returns `unknown`, which is the point — the door takes what a driver gives.
+ */
+export function rowOf(item: WorkItem): WorkItemRow {
+  return toWorkItemRow(item);
+}
+
+export const fromTheDriver: Result<WorkItem, CadenceError> = parseWorkItemRow(JSON.parse('{}'));
+
+export const statusOf: Result<WorkItemStatus, CadenceError> = parseStatus('ready');
+
+export const scheduleOf: Result<Recurrence | null, CadenceError> = parseSchedule(null);
 
 /** The shipped wait satisfies the port a caller is meant to inject. */
 export const injectedSleep: SleepFn = sleep;

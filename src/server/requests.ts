@@ -1,11 +1,11 @@
 import { shown } from '../core/errors.js';
 import { isOk } from '../core/result.js';
-import { createSeriesCursor } from '../core/cursor.js';
 import type { Recurrence } from '../core/recurrence.js';
 import { parseEstimate, type Estimate } from '../domain/estimate.js';
 import { parseId, type BoardId, type BrandedId, type MemberId, type WorkItemId } from '../domain/ids.js';
-import { WORK_ITEM_STATUSES, type WorkItemStatus } from '../domain/model.js';
-import { HttpError, asHttpError, fromCadenceError } from './http-error.js';
+import { parseStatus, type WorkItemStatus } from '../domain/model.js';
+import { parseSchedule } from '../domain/schedule.js';
+import { HttpError, fromCadenceError } from './http-error.js';
 
 type IdKind = keyof typeof NAMESPACES;
 
@@ -30,10 +30,6 @@ const DEFAULT_OCCURRENCES = 20;
  * examines for one row stays the engine's own business.
  */
 const MAX_OCCURRENCES = 1_000;
-
-// Widened on purpose: `WORK_ITEM_STATUSES` has the union as its element type, so `.includes()` would
-// refuse a plain string — and the value being tested here arrived as one.
-const KNOWN_STATUSES: readonly string[] = WORK_ITEM_STATUSES;
 
 export interface CreateBoard {
   readonly id: BoardId;
@@ -95,11 +91,10 @@ function readLabel(raw: unknown, code: string, what: string): string {
 }
 
 function readStatus(raw: unknown): WorkItemStatus {
-  if (typeof raw !== 'string' || !KNOWN_STATUSES.includes(raw)) {
-    throw new HttpError(400, 'INVALID_STATUS', `status must be one of ${WORK_ITEM_STATUSES.join(', ')}, got ${shown(raw)}`);
-  }
+  const parsed = parseStatus(raw);
+  if (!isOk(parsed)) throw fromCadenceError(parsed.error);
 
-  return raw as WorkItemStatus;
+  return parsed.value;
 }
 
 function readMemberIds(raw: unknown): readonly MemberId[] {
@@ -125,29 +120,17 @@ function readAssignee(raw: unknown): MemberId | null {
 }
 
 /**
- * The engine is the only authority on what a recurrence is, so this asks it rather than repeating its
- * rules. It asks through `createSeriesCursor`, because that is the object the scheduler will actually
- * walk: `occurrences()` normalises the rule and resolves the anchor when the series is created, so
- * constructing a cursor runs every one of the engine's checks without pulling a single occurrence.
- * Probing with `nextOccurrence(rule, rule.dtStart)` did the same checks one level further in, and
- * reported a client that sent `dtStart: "2026-03-28T01:30:00.000Z"` as
- * `after must be an integer epoch ms` — the engine's own parameter name, in a message about a field
- * nobody called `after`.
+ * The engine is the only authority on what a recurrence is, so this asks the domain's door onto it rather
+ * than repeating any of its rules here. That door probes with `createSeriesCursor`, because it is the
+ * object the scheduler will actually walk — and it checks that the field is an object at all before
+ * asking, so a client that sent `schedule: "PT5M"` is told about `schedule` instead of being told
+ * `freq must be one of DAILY, WEEKLY, MONTHLY, YEARLY, got undefined`.
  */
 function readSchedule(raw: unknown): Recurrence | null {
-  if (raw === undefined || raw === null) return null;
-  if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new HttpError(400, 'INVALID_SCHEDULE', `schedule must be an object or null, got ${shown(raw)}`);
-  }
+  const parsed = parseSchedule(raw);
+  if (!isOk(parsed)) throw fromCadenceError(parsed.error);
 
-  const candidate = raw as Recurrence;
-  try {
-    createSeriesCursor(candidate);
-  } catch (cause) {
-    throw asHttpError(cause);
-  }
-
-  return candidate;
+  return parsed.value;
 }
 
 export function parseCreateBoard(raw: unknown): CreateBoard {

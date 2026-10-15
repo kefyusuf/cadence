@@ -13,12 +13,13 @@ computing it, the adapters that implement the domain ports, the configuration la
 environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
 an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, across those three days,
 streams over the lazy engine: first the measurements of what a `Readable` actually pulls, then the route
-those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it, and the
-estimate grown into the project's first value object. The board UI, cache, queue and observability layers
+those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it, the
+estimate grown into the project's first value object, and the row a store with columns holds — the door
+between those two shapes, with its cost measured. The board UI, cache, queue and observability layers
 come next; see `docs/adr/`.
 
-**Gate (measured, not claimed):** 22 test files · 259 tests · 99.60% statement and 98.00% branch
-coverage · 12 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
+**Gate (measured, not claimed):** 23 test files · 288 tests · 99.63% statement and 98.38% branch
+coverage · 13 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
 verification on Node 22 and 24, and a second job builds the test and prod images, keeps the prod
 container running read-only, unprivileged and with all capabilities dropped until its own
 `GET /healthz` probe reports `healthy`, then proves that a `SIGTERM` stops it with exit code 0.
@@ -122,6 +123,48 @@ item that carries `-3` is not a thing this codebase can say. Reasoning — inclu
 only the schedule — is in
 [ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md).
 
+A value cannot live in a column, so the domain now owns the door between the two shapes. `WorkItemRow` is
+the same eight fields with the brands erased — ids are strings, `status` is a string, the estimate is the
+number it was made of — and `parseWorkItemRow` reads a row an outside store handed it by asking the door that
+owns each rule, never by re-deriving one:
+
+```ts
+import { parseWorkItemRow, toWorkItemRow } from 'cadence/domain';
+
+const row = { id: 'wi_deploy', boardId: 'bd_core', title: 'Deploy the release', status: 'ready',
+              assigneeId: 'mb_yusuf', estimateMinutes: 30,
+              schedule: { tz: 'Europe/Berlin', dtStart: 1774661400000, freq: 'WEEKLY', byWeekDay: ['MO', 'FR'] },
+              createdAt: 1772000000000 };
+
+parseWorkItemRow(row);
+// { ok: true, value: { …, estimateMinutes: Estimate, … } } — a value again: it JSON-stringifies to 30,
+//   `equals` the estimate that went in, and is not the same object. toWorkItemRow of it is that row.
+parseWorkItemRow({ ...row, status: 'archived' });
+// INVALID_STATUS    status must be one of backlog, ready, in_progress, blocked, done, got "archived"
+parseWorkItemRow({ ...row, schedule: { ...row.schedule, freq: 'HOURLY' } });
+// INVALID_FREQUENCY freq must be one of DAILY, WEEKLY, MONTHLY, YEARLY, got HOURLY   <- the engine's own words
+parseWorkItemRow({ ...row, estimateMinutes: '30' });
+// INVALID_ESTIMATE  estimateMinutes must be a number of minutes, got "30"
+parseWorkItemRow({ ...row, id: 'wi_deploy ' });
+// INVALID_ID        work-item id must not have leading or trailing whitespace
+parseWorkItemRow({ ...row, createdAt: 1.5 });
+// INVALID_INSTANT   createdAt must be an integer epoch ms, got 1.5
+parseWorkItemRow(null);
+// INVALID_WORK_ITEM a work item row must be a JSON object, got null
+```
+
+The order is the one ADR 0012 measured and this makes a rule: cloning the item throws `DataCloneError`,
+cloning the row is fine, so a store copies the row and hydrates it, never the other way round. Every
+refusal above belongs to somebody else — the engine wrote `INVALID_FREQUENCY`, the clock wrote
+`INVALID_INSTANT`, the vocabulary wrote `INVALID_STATUS`, the id rule wrote `INVALID_ID` — and the codec
+quotes them rather than inventing a second wording. One shape is not a refusal at all: a rule the engine
+crashes on (`byWeekDay` spelled as a string, which the engine never type-checks) is this process's problem,
+and the route answers 500 `INTERNAL` with the engine's own words withheld. The ports did
+not change — `WorkItemStore` still speaks `WorkItem` — because the alternative was every adapter keeping its
+own copy of four rules that already have owners. Reasoning, including the two fields this codec deliberately
+does not police and what hydrating 100000 scheduled rows costs on three runtimes, is in
+[ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md).
+
 The API is the layer all of the above was built for: eight routes over the two stores and the engine.
 `createApp(deps)` takes the boards store, the work-item store, the clock and the logger switch, and
 returns an application that does not listen; `src/server/main.ts` is the one file that reads the
@@ -161,8 +204,10 @@ The rest of the envelope contract is the same shape everywhere: ids declare thei
 "it is gone"; a route that does not exist answers `NOT_FOUND` in that envelope, and so does
 `DELETE /boards`, because the layer answers 404 where it has no route instead of computing a 405; and a
 failure nobody threw — a store whose pool is closed — answers 500 `INTERNAL` with the underlying
-message withheld. Reasoning, including the two core defects this boundary found and where they were
-fixed, is in [ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md).
+message withheld, and so does a door's `UNEXPECTED`: the label `fromThrowable` puts on a throw this
+codebase did not write (ADR 0013 decision 9). Reasoning, including the two core defects this boundary
+found and where they were fixed, is in
+[ADR 0008](docs/adr/0008-the-http-layer-throws-at-the-door-and-the-engine-stays-the-only-authority-on-a-rule.md).
 
 The eighth route is the first response this service does not have in hand before it answers.
 `GET /boards/:id/export` streams NDJSON — one header row per work item, one row per occurrence of its rule,
@@ -253,28 +298,30 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0009](docs/adr/0009-the-containers-command-is-the-service-and-a-service-is-proved-by-the-request-it-answers.md) (the running service and its signals),
 [ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured),
 [ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md) (the streamed route, and what a real socket does to it),
-[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md) (the first value object, and what a store can and cannot copy).
+[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md) (the first value object, and what a store can and cannot copy),
+[ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md) (the row a column store holds, and which layer owns the door it comes through).
 
 ## Run it
 
 All of this is green on the host (Node v26.8.2), inside the image CI builds (Node 24.21.0) and in a
-clean `node:22-bookworm-slim` container with this tree copied in — the same `259 tests in 22 files`, the same
-13 package checks over 7 export targets, the same 53 files linted clean, and the same
-`61 modules / 114 dependencies` wherever `dist` does not exist yet. Coverage no longer splits by runtime
-either: `1003` of `1007` statements and `443` of `452` branches on all three. The package is the one figure
-that still tracks the call: 107 files on every runtime, and a gzipped byte total that moves when this
+clean `node:22-bookworm-slim` container with this tree copied in — the same `288 tests in 23 files`, the same
+13 package checks over 7 export targets, the same 56 files linted clean, and the same
+`64 modules / 134 dependencies` wherever `dist` does not exist yet. Coverage does not split by runtime
+either: `1084` of `1088` statements and `486` of `494` branches on all three. The package is the one figure
+that still tracks the call: 115 files on every runtime, and a gzipped byte total that moves when this
 document is edited, because this document is inside it — and moves again with the filesystem that packed it,
-which is why the per-environment totals are recorded in
-[ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md),
-which the tarball does not ship (ADR 0011 decision 4 records why the bytes follow the call):
+which is why the per-environment totals, and the tar-header modes that explain the gap between them, are
+recorded in [ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md)
+rather than inherited from the ADR before it, which the tarball does not ship (ADR 0011 decision 4 records why
+the bytes follow the call):
 
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
-npm run lint          # eslint flat config, type-aware (53 files, 0 errors, 0 warnings)
-npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 58 modules / 108 dependencies with dist present and 61 / 114 without it
-npm test              # 259 tests in 22 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket, and the estimate as a value
-npm run test:coverage # 99.60% statements (1003/1007) / 98.00% branches (443/452) / 100% functions, identical on all three runtimes, gated in vitest.config.ts
+npm run lint          # eslint flat config, type-aware (56 files, 0 errors, 0 warnings)
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 61 modules / 128 dependencies with dist present and 64 / 134 without it
+npm test              # 288 tests in 23 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket, the estimate as a value, the row a store with columns holds, and the 500 that says nothing about an engine bug
+npm run test:coverage # 99.63% statements (1084/1088) / 98.38% branches (486/494) / 100% functions, identical on all three runtimes, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 13 checks against the built package, not the source tree
 npm start             # node dist/server/main.js — needs the build above, and reads HOST/PORT/LOG_LEVEL

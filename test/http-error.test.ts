@@ -30,7 +30,14 @@ describe('asHttpError', () => {
 
   it('answers a rule it gave up on with a 500, because that is this process failing', () => {
     expect(fromCadenceError(new CadenceError('SEARCH_EXHAUSTED', 'gave up'))).toMatchObject({ statusCode: 500 });
-    expect(fromCadenceError(new CadenceError('UNEXPECTED', 'a non-cadence throw'))).toMatchObject({ statusCode: 500 });
+
+    // `UNEXPECTED` is the label `fromThrowable` puts on a throw this codebase did not write, and ADR 0013
+    // measured a schedule shape that reaches it. Such a failure is answered the way `asHttpError` already
+    // answers one: a 500, and not a word of what the engine said.
+    const unexpected = fromCadenceError(new CadenceError('UNEXPECTED', 'rec.byWeekDay.map is not a function'));
+
+    expect(unexpected).toMatchObject({ statusCode: 500, code: 'INTERNAL' });
+    expect(unexpected.message).toBe('the request could not be handled');
   });
 
   it('keeps the status of a request-shaped failure from elsewhere and calls it a bad body', () => {
