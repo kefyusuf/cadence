@@ -230,6 +230,27 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   host's, which is a packaging difference over the same 107 files, not a difference in what ships. The
   decision 3 probe printed its recorded line on all three, not only on the host.
 
+  Only two of those three runtimes have a build recipe the repository itself carries: the host and
+  `--target test`, which is Node 24. The Node 22 figure came from a container this slice assembled on the
+  spot, so the recipe is written here rather than left as an assertion — a scratch Dockerfile, deliberately
+  not added to the repo, built with `docker build -f n22.Dockerfile -t cadence-n22 .` from the tree root. Note
+  that it copies the whole context, `.dockerignore` aside, so it picked up the `LICENSE` without being told;
+  the `test` stage had to learn the same fact by name:
+
+  ```dockerfile
+  FROM node:22-bookworm-slim
+  ENV NODE_ENV=development
+  WORKDIR /app
+  COPY . /app
+  RUN npm ci --no-audit --no-fund && chown -R node:node /app
+  USER node
+  CMD ["npm", "test"]
+  ```
+
+  Without the `chown` the suite cannot start at all: vite writes a timestamped copy of `vitest.config.ts`
+  next to the file, and a `node`-owned process pointed at a root-owned `/app` dies with `EACCES` before the
+  first test runs. That is the same reason the real `test` stage `chown`s and copy-lists explicitly.
+
   The `LICENSE` deserves its own paragraph because it moved a measured number while being listed nowhere:
   `files` still names only `dist` and `README.md`, but npm packs a root `LICENSE` whatever the manifest says,
   so the tarball went from 106 files to 107 the day that file appeared. The re-measure then caught something
@@ -238,9 +259,14 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   tarball while the host and CI's own checkout packed **107** — one script, two package surfaces, and no gate
   able to see the difference, because every number it printed was honest about the directory it was run in.
   Putting `LICENSE` on that one `COPY` is what made the three runtimes agree, and the two Linux runs then
-  reported byte-identical tarballs. The `prod` stage is deliberately untouched: it ships `dist`, not the npm
-  tarball, so whether a running container should carry the license text is a different question with a
-  different answer, and this slice did not earn it. The shape of the failure is ADR 0011 decision 4's, in the
+  reported byte-identical tarballs. The `prod` stage was left alone, and the limit of that choice is worth
+  stating rather than smoothing over: its `COPY package.json README.md ./` is the same kind of hand-written
+  list and it drops the `LICENSE` too. What differs is the claim each layer is asked to prove.
+  `verify:package` asserts something about the *published package*, so a file the packer ships and the image
+  hides makes the assertion about a surface nobody publishes; `prod` is judged by `selfcheck.mjs`, which
+  asserts that `dist`, the one runtime dependency and the entry points resolve for the user who will run them
+  — a license text carried into a running container is a packaging question, not a verification question, and
+  this slice did not earn the right to answer it. The shape of the failure is ADR 0011 decision 4's, in the
   other direction — a verification assembled by hand from a file list can stay green while measuring a surface
   that no longer exists.
 
@@ -248,6 +274,8 @@ it is a bug: `structuredClone` is a data copier, and the estimate is not data.
   them: `verify:package` reports the *gzipped* tarball, and the README is inside that tarball, so a sentence
   quoting the number changes it. The README that said `53498` measured `53500` right after the edit that wrote
   `53498` into it — two bytes, from nothing but the digits — and a doc comment added three directories away
-  later moved the whole figure by `216`. There is no fixed point to write down. This file is not packed, so the
-  figures above are the ones a re-run prints, which is the same reason ADR 0011 decision 4 pins byte counts to
-  a call rather than to a document; the README keeps only the part that does not move, `107 files`.
+  later moved the whole figure by `216`. Those three observations are the pre-`LICENSE` tree's and no longer
+  reproduce; they are kept as the history of how the measurement behaves, not as a number to check. There is
+  no fixed point to write down. This file is not packed, so the figures above are the ones a re-run prints,
+  which is the same reason ADR 0011 decision 4 pins byte counts to a call rather than to a document; the
+  README keeps only the part that does not move, `107 files`.
