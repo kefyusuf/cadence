@@ -7,14 +7,20 @@ A recurring-schedule engine and team board. The part that is hard is the part th
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** week 5 of a build-in-public schedule — core engine, domain vocabulary, package surface,
+**Status:** built 13–14 October 2026 — core engine, domain vocabulary, package surface,
 the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
 computing it, the adapters that implement the domain ports, the configuration layer that reads the
 environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
-an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, both halves of week 5,
+an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, in the same two days,
 streams over the lazy engine: first the measurements of what a `Readable` actually pulls, then the route
 those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it. The board
 UI, cache, queue and observability layers come next; see `docs/adr/`.
+
+**Gate (measured, not claimed):** 21 test files · 243 tests · 99.58% statement and 97.94% branch
+coverage · 11 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
+verification on Node 22 and 24, and a second job builds the test and prod images, keeps the prod
+container running read-only, unprivileged and with all capabilities dropped until its own
+`GET /healthz` probe reports `healthy`, then proves that a `SIGTERM` stops it with exit code 0.
 
 ## What it does today
 
@@ -81,7 +87,7 @@ await runSeries(cursor, { clock, sleep, notify: (occurrence) => notifier.notify(
 
 Both times are in every record on purpose: that rule is daily, so `wall` never moves while `due`
 steps 23h then 24h across the spring gap. A sink that throws costs the occurrence it was handed —
-`runSeries` consumes before it notifies, so delivery is at-most-once until week 12 adds an outbox.
+`runSeries` consumes before it notifies, so delivery is at-most-once — an outbox is planned, not built.
 The reasoning, including the `bindNotifier` helper that was rejected, is in
 [ADR 0006](docs/adr/0006-the-first-adapter-holds-no-transport-and-the-gate-keeps-it-that-way.md).
 
@@ -132,7 +138,7 @@ curl -X POST 127.0.0.1:3132/boards/bd_core/work-items -H 'content-type: applicat
 # 400 {"error":{"code":"INVALID_FREQUENCY","message":"freq must be one of DAILY, WEEKLY, MONTHLY, YEARLY, got HOURLY"}}
 ```
 
-That 400 is week 1's engine error, code and all, forwarded by a boundary that re-implements none of its
+That 400 is the engine's own error, code and all, forwarded by a boundary that re-implements none of its
 rules: the server validates a schedule by building the very series cursor the scheduler would walk, and
 reports what the engine says. `dtStart` is epoch milliseconds, which is what the engine's type says and
 what the stored rule keeps — send `"2026-03-28T01:30:00.000Z"` and the refusal names the field
@@ -197,8 +203,8 @@ they stay internal until publishing them is a decision. `cadence/src/...` is clo
 CommonJS can `require()` all three on Node >= 22.12 — the reasoning is in
 [ADR 0003](docs/adr/0003-esm-only-package-with-exports-map.md).
 
-Week 5's first slice adds no product code: it measures what a `Readable` does *around* an engine that is
-already lazy, because the route its second slice then built — the NDJSON export above — is the first consumer
+The streaming work adds no product code at first: it measures what a `Readable` does *around* an engine that is
+already lazy, because the route it then made room for — the NDJSON export above — is the first consumer
 that can stop, fail or go slow. One `read()` pulls exactly `highWaterMark` engine steps and hands back one of them, then
 refills one row per tick. `Readable.from(iterable)` defaults to `objectMode: true` with `highWaterMark: 1`
 — not `new Readable()`'s default and not `new Readable({objectMode: true})`'s — and that pair is identical
@@ -380,7 +386,7 @@ Nothing on the HTTP surface is authenticated. Whoever can reach the port can cre
 item, and since this slice can read a whole board's schedule out of it as NDJSON; what limits that today is
 the host half of the mapping — the image binds every interface and
 `compose.yaml` publishes `127.0.0.1:3000`, so a process on this machine can reach it and a machine on the
-network cannot. Week 5 owns the member identity the `mb_` ids are waiting for. The mutation surface is
+network cannot. The member identity the `mb_` ids are waiting for is not built yet. The mutation surface is
 `PATCH` only — no delete, no reorder, no bulk move — and a concurrent write is a last-writer-wins race,
 because the stores keep no version.
 
@@ -391,7 +397,7 @@ wrong value is one line into a boot instead of a mystery.
 
 Delivery is at-most-once: `runSeries` advances the cursor before it notifies, so a sink that throws
 loses that occurrence and a retry replays from the next one. Making that at-least-once needs stored
-progress and a retry — week 12, not a wrapper around the notifier.
+progress and a retry — planned, not built — not a wrapper around the notifier.
 
 The scheduler is not wired to the API yet: a work item can carry a rule, the export walks that rule for as
 long as the caller asks, and the routes refuse a bad one, but nothing advances the cursor a store holds on a
