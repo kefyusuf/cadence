@@ -7,19 +7,20 @@ A recurring-schedule engine and team board. The part that is hard is the part th
 tested first: a rule like *"every day at 02:30, Europe/Berlin"* has to survive the two days a
 year when that wall-clock time either does not exist or happens twice.
 
-**Status:** built 13–15 October 2026 — core engine, domain vocabulary, package surface,
+**Status:** built 13–16 October 2026 — core engine, domain vocabulary, package surface,
 the layering gates that keep them apart, the async layer that waits for an occurrence instead of just
 computing it, the adapters that implement the domain ports, the configuration layer that reads the
 environment in one place, the HTTP API in front of all of it, the container that runs it as a service:
-an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, across those three days,
+an HTTP health probe in, a `SIGTERM` answered by a drain, exit 0 out — and, across those four days,
 streams over the lazy engine: first the measurements of what a `Readable` actually pulls, then the route
 those measurements were taken for, `GET /boards/:id/export`, with what a real socket does to it, the
 estimate grown into the project's first value object, and the row a store with columns holds — the door
-between those two shapes, with its cost measured. The board UI, cache, queue and observability layers
+between those two shapes, with its cost measured, and the in-memory store that now walks through it on
+every read. The board UI, cache, queue and observability layers
 come next; see `docs/adr/`.
 
-**Gate (measured, not claimed):** 23 test files · 288 tests · 99.63% statement and 98.38% branch
-coverage · 13 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
+**Gate (measured, not claimed):** 23 test files · 289 tests · 99.63% statement and 98.18% branch
+coverage · 14 ADRs. CI runs typecheck, lint, dependency lint, coverage, build and package
 verification on Node 22 and 24, and a second job builds the test and prod images, keeps the prod
 container running read-only, unprivileged and with all capabilities dropped until its own
 `GET /healthz` probe reports `healthy`, then proves that a `SIGTERM` stops it with exit code 0.
@@ -165,6 +166,18 @@ own copy of four rules that already have owners. Reasoning, including the two fi
 does not police and what hydrating 100000 scheduled rows costs on three runtimes, is in
 [ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md).
 
+The door has a caller now. `src/adapters/memory-store.ts` holds each work item as the row a column store
+would hold, and every `load` and `listForBoard` walks it back through `parseWorkItemRow`. The probe that
+measured both shapes put a read at `4.5`× to `7.2`× of what the value-holding copy did, depending on the
+runtime; this file, swept again without the probe in the way, reads a board of a thousand scheduled items in
+`5.4`–`9.6 ms` on the host, `5.6`–`8.4 ms` in the Node 24 image and `6.7`–`8.4 ms` in the Node 22 one, and a
+board with no matching item in `7` µs, because the filter runs before the hydrate. It
+also means two loads of one record are never the same object, so the suite compares rows rather than values:
+`toEqual` judges functions by identity, and a rebuilt `Estimate` carries a new closure. The leak that made the
+slice worth measuring was on the way *out*, and the test that caught it was already in the file — the numbers,
+the aliasing table and the refusal the store throws rather than answering `null` are in
+[ADR 0014](docs/adr/0014-the-store-that-holds-rows-copies-on-the-way-out-and-the-row-is-the-only-shape-its-tests-agree-on.md).
+
 The API is the layer all of the above was built for: eight routes over the two stores and the engine.
 `createApp(deps)` takes the boards store, the work-item store, the clock and the logger switch, and
 returns an application that does not listen; `src/server/main.ts` is the one file that reads the
@@ -299,29 +312,35 @@ Design decisions and their trade-offs: [ADR 0001](docs/adr/0001-wall-clock-recur
 [ADR 0010](docs/adr/0010-a-stream-pulls-exactly-what-its-consumer-asks-for-unless-somebody-flows-it.md) (what a stream pulls, measured),
 [ADR 0011](docs/adr/0011-the-response-dies-with-the-socket-and-only-the-request-bounds-the-walk.md) (the streamed route, and what a real socket does to it),
 [ADR 0012](docs/adr/0012-a-value-is-shared-not-copied-the-store-clones-what-can-change-and-hands-out-what-cannot.md) (the first value object, and what a store can and cannot copy),
-[ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md) (the row a column store holds, and which layer owns the door it comes through).
+[ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md) (the row a column store holds, and which layer owns the door it comes through),
+[ADR 0014](docs/adr/0014-the-store-that-holds-rows-copies-on-the-way-out-and-the-row-is-the-only-shape-its-tests-agree-on.md) (the adapter that walks that door, the leak on the way out, and what both cost per read).
 
 ## Run it
 
 All of this is green on the host (Node v26.8.2), inside the image CI builds (Node 24.21.0) and in a
-clean `node:22-bookworm-slim` container with this tree copied in — the same `288 tests in 23 files`, the same
+clean `node:22-bookworm-slim` container with this tree copied in — the same `289 tests in 23 files`, the same
 13 package checks over 7 export targets, the same 56 files linted clean, and the same
-`64 modules / 134 dependencies` wherever `dist` does not exist yet. Coverage does not split by runtime
-either: `1084` of `1088` statements and `486` of `494` branches on all three. The package is the one figure
+`64 modules / 137 dependencies` wherever `dist` does not exist yet. Coverage does not split by runtime
+either: `1092` of `1096` statements and `116` of `116` functions on all three, and branches at `98.18 %`
+everywhere — but a branch *count* is not even a runtime constant: nine coverage runs of this tree printed
+`486` of `495` eight times and `487` of `496` once, in the Node 22 container, and both floor to `98.18`.
+The package is the one figure
 that still tracks the call: 115 files on every runtime, and a gzipped byte total that moves when this
 document is edited, because this document is inside it — and moves again with the filesystem that packed it,
-which is why the per-environment totals, and the tar-header modes that explain the gap between them, are
-recorded in [ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md)
-rather than inherited from the ADR before it, which the tarball does not ship (ADR 0011 decision 4 records why
+which is why the per-environment totals for this tree, and the three tar-header modes that explain the gap
+between them, are recorded in
+[ADR 0014](docs/adr/0014-the-store-that-holds-rows-copies-on-the-way-out-and-the-row-is-the-only-shape-its-tests-agree-on.md)
+rather than inherited from [ADR 0013](docs/adr/0013-a-store-holds-a-row-the-domain-holds-a-value-and-one-codec-in-the-domain-owns-the-door-between.md),
+which is where the mode account itself is (ADR 0011 decision 4 records why
 the bytes follow the call):
 
 ```sh
 npm ci
 npm run typecheck     # tsc --noEmit, strict + noUncheckedIndexedAccess + exactOptionalPropertyTypes
 npm run lint          # eslint flat config, type-aware (56 files, 0 errors, 0 warnings)
-npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 61 modules / 128 dependencies with dist present and 64 / 134 without it
-npm test              # 288 tests in 23 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket, the estimate as a value, the row a store with columns holds, and the 500 that says nothing about an engine bug
-npm run test:coverage # 99.63% statements (1084/1088) / 98.38% branches (486/494) / 100% functions, identical on all three runtimes, gated in vitest.config.ts
+npm run lint:deps     # dependency-cruiser: no inner layer imports a package or a Node builtin, none reaches src/adapters or src/server, and core, domain and scheduler do not reach src/config either — 0 violations, 61 modules / 131 dependencies with dist present and 64 / 137 without it
+npm test              # 289 tests in 23 files: wall-clock recurrence, DST transitions, cancellation, the notifier, configuration, the in-memory stores over the row codec, the HTTP surface, the stop path, the semantics of a stream over the engine, the NDJSON export stream and that export over a real socket, the estimate as a value, the row a store with columns holds, and the 500 that says nothing about an engine bug
+npm run test:coverage # 99.63% statements (1092/1096) / 98.18% branches (486/495, or 487/496: the count moves between runs of one runtime) / 100% functions (116/116) — the percentages are the same on all three runtimes, gated in vitest.config.ts
 npm run build         # tsc -> dist with declarations and maps
 npm run verify:package # 13 checks against the built package, not the source tree
 npm start             # node dist/server/main.js — needs the build above, and reads HOST/PORT/LOG_LEVEL
@@ -403,8 +422,9 @@ src/config/    app-config.ts (AppConfig and the rules that produce it — takes 
                reads the platform)
 src/adapters/  log-notifier.ts (a ScheduleNotifier that renders one record per occurrence and hands
                it to an injected sink), env-config.ts (the one file that reads process.env),
-               memory-store.ts (BoardStore and WorkItemStore over one pool, copying on the way in
-               and the way out), system-clock.ts (the Clock port as `Date.now()`), process-signals.ts
+               memory-store.ts (BoardStore and WorkItemStore over one pool — boards as values, items as
+               WorkItemRow, copied on the way in and on the way out and hydrated through the domain's door),
+               system-clock.ts (the Clock port as `Date.now()`), process-signals.ts
                (the `process` global as the one object that can attach and detach a stop listener) —
                internal: dist has them, the exports map does not
 src/server/    requests.ts (one body in, validated by the engine, not re-derived — and the occurrence bound
@@ -449,7 +469,8 @@ not, because every route today takes its id from the caller: the client names th
 not. The fifth satisfies an interface `src/server` declares rather than a domain port, because a stop
 signal is a process lifecycle concept and not a board concept. Board UI, durable persistence, caching,
 queueing and metrics are still to come, and the HTTP layer is built against the in-memory stores — that is
-the seam, not the persistence story: everything they hold is gone when the process is. Each lands with its
+the seam, not the persistence story: everything they hold is gone when the process is, though a work item is
+now held as the row a real store would hold, so week 11 changes the transport and not the door. Each lands with its
 own test seam rather than as scaffolding.
 
 Nothing on the HTTP surface is authenticated. Whoever can reach the port can create a board and move an

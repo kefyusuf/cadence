@@ -27,7 +27,7 @@ This slice is that moment, and it started by measuring rather than by arguing. A
 `WorkItem`, four already had a door** — `id`, `boardId` and `assigneeId` through `parseId`, `estimateMinutes`
 through `parseEstimate` — and four had none: `title`, `status`, `schedule`, `createdAt`. `status` was the
 surprising one: its rule was written, in `requests.ts`, in the one layer a store never passes through. The
-the same measurement, re-run once the codec existed against the fixture `test/work-item-row.test.ts` now
+same measurement, re-run once the codec existed against the fixture `test/work-item-row.test.ts` now
 uses, printed `253` bytes for the item and `253` for the row built from it — **byte for byte identical**
 (host, Node v26.8.2, win32, off `dist`; the test asserts the two strings are equal). A row is therefore not a
 shrunken item; it is the same wire with a different type behind it, which is exactly why the repository had
@@ -159,7 +159,12 @@ decision 6 records again against the real implementation.
    `CADENCE_ERROR_CODES.length` printed `20` off `dist/core/index.js` on the host. ADR 0007 recorded 15,
    ADR 0008 16 and ADR 0012 17; the array is the truth and each ADR's number is its own date's.
 
-8. **No adapter uses the codec yet, and that is the honest part of this decision.** `memory-store.ts` is
+8. **No adapter uses the codec yet, and that is the honest part of this decision.** *(Superseded the next day
+   by [ADR 0014](0014-the-store-that-holds-rows-copies-on-the-way-out-and-the-row-is-the-only-shape-its-tests-agree-on.md):
+   `memory-store.ts` now keeps one `WorkItemRow` per item, and `test/memory-store.test.ts` asserts that a
+   hydrated item's estimate is `equals` to the one that was saved and **not** the same object. The paragraph is
+   left in place because it is what this slice measured and decided on its own date; the sentence it names as
+   the honest one is no longer true of the tree.)* `memory-store.ts` was
    untouched: it still clones the schedule, shares the estimate, and `test/memory-store.test.ts` still asserts
    `loaded.estimateMinutes` **is** `saved.estimateMinutes`. The row codec has one future caller — the
    persistence adapter that reads columns — and it is not in this repository yet (week 11). To keep it from
@@ -216,7 +221,9 @@ decision 6 records again against the real implementation.
   and `61 / 128` with one (the `61` is what ADR 0012 recorded, because `scripts/typecheck-consumer.ts` resolves
   `cadence` into `dist` once it exists); `verify:package` still 13 checks over 7 export targets, tarball now
   `115` files on every runtime — `60090` bytes gzipped on the host and on CI's own Linux runner, `60104` on
-  the two Linux images built on this machine, `205854` content bytes on all of them.
+  the two Linux images built on this machine, `205854` content bytes on all of them. ADR 0014 is the next date
+  for this list — the decision-8 sentence above is the one that made it change — and it records which of these
+  figures moved because of code and which because of the engine that measured them.
 - **A route can now answer `500 INTERNAL` for a rule nobody wrote, and that is the old answer, not a new
   one.** Decision 9 is the one place this slice changed the HTTP layer's behaviour rather than its plumbing:
   `fromCadenceError` withholds the message of an `UNEXPECTED` failure, which is what `asHttpError` already did

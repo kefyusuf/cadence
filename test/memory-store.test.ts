@@ -4,6 +4,7 @@ import type { Recurrence } from '../src/core/recurrence.js';
 import { createEstimate } from '../src/domain/estimate.js';
 import { parseId } from '../src/domain/ids.js';
 import type { Board, WorkItem } from '../src/domain/model.js';
+import { toWorkItemRow } from '../src/domain/work-item-row.js';
 import { createMemoryStores } from '../src/adapters/memory-store.js';
 import type { BoardStore, WorkItemStore } from '../src/domain/ports.js';
 
@@ -130,7 +131,10 @@ describe('the work item store', () => {
 
     await workItems.save(saved);
 
-    await expect(workItems.load(itemId)).resolves.toEqual(saved);
+    const loaded = await workItems.load(itemId);
+    if (loaded === null) throw new Error('the item was not stored');
+
+    expect(toWorkItemRow(loaded)).toEqual(toWorkItemRow(saved));
   });
 
   it('lists only the items of the board it was asked for, in save order', async () => {
@@ -164,7 +168,7 @@ describe('the work item store', () => {
     await expect(workItems.listForBoard(boardId)).resolves.toHaveLength(1);
   });
 
-  it('holds a copy of the schedule, not the array the caller kept', async () => {
+  it('does not let a caller edit what it holds, from the schedule a load handed back', async () => {
     const { workItems } = fresh();
     const saved = item();
     await workItems.save(saved);
@@ -176,10 +180,15 @@ describe('the work item store', () => {
     }
     mutable(schedule.byWeekDay).push('SU');
 
-    await expect(workItems.load(itemId)).resolves.toEqual(saved);
+    const again = await workItems.load(itemId);
+    if (again === null) throw new Error('the item was not stored');
+
+    // Whole items are compared as rows, which is the only shape two of them agree in: a rebuilt
+    // `Estimate` carries a new closure, and `toEqual` compares functions by identity.
+    expect(toWorkItemRow(again)).toEqual(toWorkItemRow(saved));
   });
 
-  it('hands back the estimate it was given, because a value has nothing to copy', async () => {
+  it('rebuilds the estimate on the way out, because a row cannot hold a value', async () => {
     const { workItems } = fresh();
     const saved = item();
 
@@ -187,19 +196,44 @@ describe('the work item store', () => {
 
     const loaded = await workItems.load(itemId);
     if (loaded === null) throw new Error('the item was not stored');
+    if (loaded.estimateMinutes === null) throw new Error('the item lost its estimate');
 
-    expect(loaded.estimateMinutes).toBe(saved.estimateMinutes);
+    expect(loaded.estimateMinutes.equals(saved.estimateMinutes)).toBe(true);
+    expect(loaded.estimateMinutes).not.toBe(saved.estimateMinutes);
   });
 
-  it('hands out a distinct object on every load', async () => {
+  it('does not let a caller edit what it holds, from the object it was given', async () => {
+    const { workItems } = fresh();
+    // Typed as `Recurrence`, not `as const`: the write below adds a day this fixture does not contain,
+    // and a literal tuple would refuse it. The store is what decides whether the write lands.
+    const schedule: Recurrence = { ...daily, freq: 'WEEKLY', byWeekDay: ['MO'] };
+    await workItems.save(item({ schedule }));
+
+    const days = schedule.byWeekDay;
+    if (days === undefined) throw new Error('the fixture has no byWeekDay to edit');
+    mutable(days).push('FR');
+
+    const loaded = await workItems.load(itemId);
+    if (loaded?.schedule === null || loaded?.schedule === undefined || loaded.schedule.byWeekDay === undefined) {
+      throw new Error('the item lost its schedule');
+    }
+
+    expect([...loaded.schedule.byWeekDay]).toEqual(['MO']);
+  });
+
+  it('hands out a distinct value on every load, and the same record every time', async () => {
     const { workItems } = fresh();
     await workItems.save(item());
 
     const first = await workItems.load(itemId);
     const second = await workItems.load(itemId);
+    if (first === null || second === null) throw new Error('the item was not stored');
+    if (first.estimateMinutes === null || second.estimateMinutes === null) throw new Error('a load lost its estimate');
 
-    expect(first).toEqual(second);
+    expect(toWorkItemRow(first)).toEqual(toWorkItemRow(second));
     expect(first).not.toBe(second);
+    expect(first.schedule).not.toBe(second.schedule);
+    expect(first.estimateMinutes).not.toBe(second.estimateMinutes);
   });
 
   it('stores an item whose board was never saved, because integrity is not its job', async () => {
